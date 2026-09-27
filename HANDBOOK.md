@@ -66,6 +66,7 @@ The `meta` table holds the settings that were script properties before. Change t
 | `widget_accounts` | The 3 accounts that the balance widget shows, as a JSON list of names. Set it on the screen **Admin**, card **iPhone balance widget**. |
 | `smart_lists` | The saved filter sets of the screen **Activity**, as a JSON list of `{name, filters}` (20 maximum). Save and remove them on the screen **Activity**. |
 | `tg_last_ids` | The code writes this value. Do not change it manually. |
+| `prices_retry` | The code writes this value. It holds the 06:00 price failure until the 09:00 retry. Do not change it manually. |
 | `app_url` | The address of the app. The code writes this value. The rescue cron reads it to build the Edit button. Do not change it manually. |
 
 ### Triggers and schedules
@@ -75,6 +76,7 @@ The `meta` table holds the settings that were script properties before. Change t
 | `gmail_ingest` | Apps Script, add it manually | Each 5 minutes |
 | `backup_run` | Apps Script, run `backup_install()` one time | Each day, approximately 03:00 |
 | IBKR prices, then the net worth snapshot | Cloudflare cron, in `wrangler.toml` | 06:00 Manila time |
+| The same job again, only if the 06:00 prices failed | A third Cloudflare cron, in `wrangler.toml` | 09:00 Manila time |
 | Telegram message rescue | A second Cloudflare cron, in `wrangler.toml` | Each 2 minutes |
 
 Cloudflare does not do a job again after a failure. Thus each job sends a Telegram message if it fails. Apps Script disables a trigger after a number of failures.
@@ -258,7 +260,7 @@ The code and the database do not go back together. Undo the code first.
 | The app shows "Storage is full" and does not save the entry. | The device has no free space for the offline queue. The app deletes the cached screens first, then makes a second attempt. This message means that the second attempt also failed. Delete files on the device. Then enter the transaction again, because the app did not record it. |
 | The app starts, but each request fails. | `npm run tail`. Usually the D1 binding or a secret is absent. |
 | The bot sends the message "share count drift". | The count of shares in the ledger does not agree with the count at IBKR. Examine a corporate action first, for example a split of shares. For a split, multiply the quantity of shares in each earlier transfer leg. Change the field **ToAmount** on a purchase. Change the field **Amount** on a sale. Change a leg before the effective date only. Then examine a trade that nobody recorded. The job does not write the count from IBKR, because that action hides the cause. |
-| The price job says "blocked before IBKR answered". | An edge between the Worker and IBKR refused the request. IBKR never saw it, so no token and no query is at fault. The reply body names the edge, for example "403 error code: 1000". Do nothing the first time: the job tries a second request by itself, and the next run is the following morning. Examine the IBKR system status page if the message arrives on two days. |
+| The price job says "blocked before IBKR answered". | An edge between the Worker and IBKR refused the request. IBKR never saw it, so no token and no query is at fault. The reply body names the edge, for example "403 error code: 1000" or "530 error code: 1016". The job tries again at 09:00 by itself. You get this message only when the 06:00 and 09:00 tries both fail. Do nothing the first time. Examine the IBKR system status page if the message arrives on two days. |
 | The share values are 0 or absent. | The Telegram message from the price job. It names the IBKR error code, and it states the repair for a code that needs a person. A code that IBKR clears by itself is retried for 40 seconds first, so one message is one real fault. Then the `symbol` column of the account on the Admin screen. |
 | A balance in pesos is absent, but the native balance is correct. | The exchange rate. Examine `usd_php_fallback` in the `meta` table. |
 | A change is not in the live system. | Nobody merged the release pull request. `npm run release` only opens it. The merge into `main` deploys. |
