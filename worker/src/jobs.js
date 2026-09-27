@@ -13,7 +13,7 @@
  * reported to the owner in Telegram. A missed night is harmless: prices just stay one
  * day staler (the read path never fetches, by design).
  */
-import { manilaToday, refs, deltas, fromU, isSharesAcct } from './db.js';
+import { manilaToday, refs, deltas, fromU, isSharesAcct, metaGet, metaSet } from './db.js';
 import { notifyOwner, msgOf, drainUpdates } from './telegram.js';
 import { snapshotNetWorth } from './api.js';
 
@@ -257,6 +257,12 @@ const driftLine = (d) => d.symbol + ': ledger ' + d.ledger + ', IBKR ' + d.ibkr;
  */
 export const CRON_DAILY = '0 22 * * *';
 export const CRON_DRAIN = '*/2 * * * *';
+// 09:00 Manila: a second price attempt, which runs only when the 06:00 one failed. The
+// faults so far (403/1000 on 09-13, 500 on 09-26, 530/1016 = Cloudflare could not
+// resolve IBKR's host on 09-27) were all outside us and all had cleared hours later, but
+// never within the job's own minute of retries. Three hours is the gap that helps.
+export const CRON_RETRY = '0 1 * * *';
+const RETRY_KEY = 'prices_retry';   // meta: the 06:00 failure, while a retry is due
 
 /**
  * Route a cron firing to its job. Unknown schedules run NOTHING on purpose: guessing
@@ -265,14 +271,25 @@ export const CRON_DRAIN = '*/2 * * * *';
 export async function runScheduled(env, cron) {
   if (cron === CRON_DRAIN) return drainUpdates(env);
   if (cron === CRON_DAILY || !cron) return runCron(env);
+  if (cron === CRON_RETRY) return retryCron(env);
   console.warn('cron: no job is registered for "' + cron + '"');
+}
+
+/** The 09:00 firing: nothing to do unless 06:00 left its failure behind. */
+export async function retryCron(env) {
+  const first = await metaGet(env, RETRY_KEY, '');
+  if (!first) return { skipped: 'the 06:00 prices job did not fail' };
+  await metaSet(env, RETRY_KEY, '');   // cleared first: one retry a day, never a loop
+  return runCron(env, first);
 }
 
 /**
  * The job, wrapped. The free plan does not retry a failed cron, so the only failure
- * signal that exists is the Telegram message this sends.
+ * signal that exists is the Telegram message this sends. `firstFailure` is set on the
+ * 09:00 retry; the 06:00 run stays quiet about a price failure and hands it to that
+ * retry instead, so a transient fault costs no message at all.
  */
-export async function runCron(env) {
+export async function runCron(env, firstFailure) {
   const out = {};
   let failed = null;
   try {
@@ -280,7 +297,12 @@ export async function runCron(env) {
     console.log('prices: ' + JSON.stringify(out.prices));
   } catch (err) {
     console.error('prices failed: ' + (err && err.stack ? err.stack : err));
-    await notifyOwner(env, '⛔ *prices job failed*\n› ' + msgOf(err));
+    if (firstFailure)
+      await notifyOwner(env, '⛔ *prices job failed twice*\n› 06:00: ' + firstFailure + '\n› 09:00: ' + msgOf(err));
+    else
+      // If D1 cannot even hold the flag, no retry will come: say so now, not never.
+      await metaSet(env, RETRY_KEY, msgOf(err)).catch(() =>
+        notifyOwner(env, '⛔ *prices job failed*\n› ' + msgOf(err)));
     failed = err;   // rethrown AFTER the snapshot — see below
   }
   // A drift is not a failure — the prices landed — so it never throws. It is the one
