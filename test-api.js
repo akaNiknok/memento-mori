@@ -1822,6 +1822,29 @@ function d1(db) {
       assert.ok(sqlite.prepare('SELECT 1 FROM nw_snapshots WHERE month = ?').get(month), 'the month close was skipped');
     });
 
+    test('a failed 06:00 prices job is retried at 09:00, and only two failures message', async () => {
+      const jobEnv = Object.assign({}, env, { IBKR_FLEX_TOKEN: 't', IBKR_FLEX_QUERY_ID: 'q', TELEGRAM_BOT_TOKEN: 'x' });
+      const real = globalThis.fetch;
+      let ibkr = 0; const sent = [];
+      globalThis.fetch = async (u, o) => {
+        if (String(u).includes('interactivebrokers')) { ibkr++; throw new Error('ibkr down'); }
+        sent.push(String(o && o.body));
+        return new Response('{"ok":true}', { status: 200 });
+      };
+      try {
+        await dbm.metaSet(env, 'prices_retry', '');
+        await jobsMod.runScheduled(jobEnv, jobsMod.CRON_RETRY);
+        assert.strictEqual(ibkr, 0, 'the 09:00 retry called IBKR after a good 06:00 run');
+        await assert.rejects(jobsMod.runScheduled(jobEnv, jobsMod.CRON_DAILY), /ibkr down/);
+        assert.ok(!sent.some((b) => b.includes('prices job')), 'the 06:00 failure messaged before its retry ran');
+        assert.match(await dbm.metaGet(env, 'prices_retry', ''), /ibkr down/);
+        await assert.rejects(jobsMod.runScheduled(jobEnv, jobsMod.CRON_RETRY), /ibkr down/);
+        assert.strictEqual(ibkr, 2, 'the 09:00 run did not retry');
+        assert.strictEqual(sent.filter((b) => b.includes('failed twice')).length, 1);
+        assert.strictEqual(await dbm.metaGet(env, 'prices_retry', ''), '', 'the retry flag outlived its retry');
+      } finally { globalThis.fetch = real; }
+    });
+
     test('a storage fault answers 500, a refused payload 200', async () => {
       const h = { Cookie: 'mm_auth=' + await hex('pw'), 'Content-Type': 'application/json' };
       const post = (e, body) => worker.fetch(new Request('https://x/api', { method: 'POST', headers: h,

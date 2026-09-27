@@ -55,10 +55,12 @@ migrations_dir = "migrations"
 binding = "FX_CACHE"
 id = "414311e8408f43679204a86377b6c414"
 
-# 2 of the 5 free cron triggers. UTC; Manila is UTC+8. src/jobs.js runScheduled() picks
-# the job off event.cron, and a contract guard in test.js holds these two strings equal
+# 3 of the 5 free cron triggers. UTC; Manila is UTC+8. src/jobs.js runScheduled() picks
+# the job off event.cron, and a contract guard in test.js holds these strings equal
 # to the constants there — a drifted string would run the wrong job on the wrong clock.
 #   0 22 * * *   = 06:00 Manila — IBKR Flex -> prices, then the net-worth snapshot.
+#   0 1 * * *    = 09:00 Manila — the same again, ONLY if 06:00's prices failed (meta
+#                  prices_retry). One message if both fail, none if the retry works.
 #   */2 * * * *  = the Telegram rescue drain (v2.12.0). It re-runs a turn whose
 #                  invocation died mid-flight, which throws nothing and so reports
 #                  nothing. Almost every firing reads one indexed row and stops, at ~720
@@ -66,7 +68,7 @@ id = "414311e8408f43679204a86377b6c414"
 # The free plan does NOT retry a failed cron; src/jobs.js reports failures to Telegram.
 # The daily-interest cron was removed in v2.0.1 — the bank's own figures never matched it.
 [triggers]
-crons = ["0 22 * * *", "*/2 * * * *"]
+crons = ["0 22 * * *", "0 1 * * *", "*/2 * * * *"]
 
 # ── staging ──────────────────────────────────────────────────────────────────
 # `develop`'s deploy target — memento-mori-staging.<subdomain>.workers.dev,

@@ -444,7 +444,7 @@ describe('Gmail courier watermark (vm)', () => {
       const block = /\[triggers\][\s\S]*?crons\s*=\s*\[([^\]]*)\]/.exec(toml);
       assert.ok(block, '[triggers] crons is gone — the Worker now has no schedule at all');
       const scheduled = (block[1].match(/"([^"]*)"/g) || []).map((x) => x.slice(1, -1));
-      assert.deepStrictEqual(scheduled.slice().sort(), [jobs.CRON_DAILY, jobs.CRON_DRAIN].sort(),
+      assert.deepStrictEqual(scheduled.slice().sort(), [jobs.CRON_DAILY, jobs.CRON_RETRY, jobs.CRON_DRAIN].sort(),
         'wrangler.toml schedules ' + JSON.stringify(scheduled) + ', which is not what runScheduled() dispatches');
     });
 
