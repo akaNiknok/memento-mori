@@ -717,7 +717,7 @@ function d1(db) {
   const worker = (await load('worker.js')).default;
   const hex = async (s) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)))]
     .map((b) => b.toString(16).padStart(2, '0')).join('');
-  const wenv = Object.assign({}, env, { APP_PASS: 'pw', INGEST_TOKEN: 'tok' });
+  const wenv = Object.assign({}, env, { APP_PASS: 'pw', INGEST_TOKEN: 'tok', AI_READ_TOKEN: 'ai' });
   const ctx = { waitUntil: () => {} };
   const call = async (url, init = {}) => {
     const res = await worker.fetch(new Request('https://x' + url, init), wenv, ctx);
@@ -1614,6 +1614,44 @@ function d1(db) {
       assert.strictEqual((await call('/api?action=getRecurring', { headers: cookie })).body.status, 'success');
       const bearer = { Authorization: 'Bearer tok' };
       assert.strictEqual((await call('/api?action=getExportAll', { headers: bearer })).body.status, 'success');
+    });
+
+    test('/mcp is read-only by construction and has its own credential', async () => {
+      // The AI's door. Its token opens /mcp and nothing else; the owner's two credentials
+      // do not open it; and every tool is a READ route, so no prompt can reach a write.
+      const { TOOLS } = await load('src/mcp.js');
+      const { ROUTES_READ } = await load('worker.js');
+      const reads = Object.values(ROUTES_READ);
+      for (const [name, t] of Object.entries(TOOLS)) assert.ok(reads.includes(t.fn), name + ' is not a ROUTES_READ handler');
+      for (const off of ['getExportAll', 'listTable', 'getParse']) {
+        assert.ok(!Object.values(TOOLS).some((t) => t.fn === ROUTES_READ[off]), off + ' must stay off the AI allowlist');
+      }
+      const rpc = (body, headers) => call('/mcp', { method: 'POST', body: JSON.stringify(body),
+        headers: Object.assign({ 'Content-Type': 'application/json' }, headers) });
+      const ai = { Authorization: 'Bearer ai' };
+      const list = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
+      assert.strictEqual((await rpc(list)).status, 401);
+      assert.strictEqual((await rpc(list, { Authorization: 'Bearer tok' })).status, 401, 'INGEST_TOKEN must not open /mcp');
+      assert.strictEqual((await rpc(list, { Cookie: 'mm_auth=' + await hex('pw') })).status, 401, 'the SPA cookie must not open /mcp');
+      assert.strictEqual((await call('/api?action=getAccounts', { headers: ai })).status, 401, 'AI_READ_TOKEN must not open /api');
+      assert.strictEqual((await rpc(list, ai)).body.result.tools.length, Object.keys(TOOLS).length);
+      const init = await rpc({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18' } }, ai);
+      assert.strictEqual(init.body.result.protocolVersion, '2025-06-18');
+      const got = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_accounts', arguments: {} } }, ai);
+      assert.ok(JSON.parse(got.body.result.content[0].text).accounts.length > 0);
+      // An undeclared arg never reaches the handler, and the page size is capped.
+      const tx = await rpc({ jsonrpc: '2.0', id: 3, method: 'tools/call',
+        params: { name: 'list_transactions', arguments: { limit: 5000, id: 'x1' } } }, ai);
+      const page = JSON.parse(tx.body.result.content[0].text);
+      assert.strictEqual(page.limit, 200);
+      assert.ok(page.total > 1, 'the undeclared id filter was applied');
+      const write = await rpc({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'deleteTransaction', arguments: {} } }, ai);
+      assert.strictEqual(write.body.error.code, -32602);
+      const proto = await rpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'constructor' } }, ai);
+      assert.strictEqual(proto.body.error.code, -32602);
+      // A notification gets 202 and no body; GET is not part of this server.
+      assert.strictEqual((await rpc({ jsonrpc: '2.0', method: 'notifications/initialized' }, ai)).status, 202);
+      assert.strictEqual((await call('/mcp', { headers: ai })).status, 405);
     });
 
     test('a wrangler dev host is open; a deployed host is not', async () => {

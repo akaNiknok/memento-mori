@@ -12,6 +12,7 @@
  *                  Does the work FIRST and answers after (v2.11.0); a turn that dies
  *                  anyway is re-run from D1 by the 2-minute drain cron (v2.12.0).
  *   POST /login  — passphrase -> sha256(APP_PASS) cookie (HttpOnly/Secure/Lax, 1yr).
+ *   POST /mcp    — read-only MCP for AI clients, own token AI_READ_TOKEN (src/mcp.js).
  *   GET|POST /api — the JSON API. GET = reads, POST = writes; the split comes from the
  *                  handler name's get…/list… prefix, which is also how the SPA's gs()
  *                  picks its method, so there is exactly one list to keep in sync.
@@ -30,7 +31,7 @@
  *
  * Secrets (wrangler secret put ...):
  *   APP_PASS, SECRET_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID, GEMINI_API_KEY,
- *   INGEST_TOKEN, IBKR_FLEX_TOKEN, IBKR_FLEX_QUERY_ID
+ *   INGEST_TOKEN, IBKR_FLEX_TOKEN, IBKR_FLEX_QUERY_ID, AI_READ_TOKEN (optional; unset closes /mcp)
  * Bindings: DB (D1), FX_CACHE (KV, optional — unbound just means every FX lookup fetches).
  */
 import {
@@ -41,6 +42,7 @@ import {
 } from './src/api.js';
 import { handleUpdate, ingestEmail } from './src/telegram.js';
 import { runScheduled } from './src/jobs.js';
+import { mcp } from './src/mcp.js';
 
 const COOKIE = 'mm_auth';
 
@@ -85,6 +87,7 @@ export default {
     if (request.method === 'POST' && url.pathname === '/tg') return telegram(request, env);
     if (url.pathname === '/login') return login(request, env);
     if (url.pathname === '/api') return api(request, env, url);
+    if (url.pathname === '/mcp') return mcp(request, env, isLocalDev(url));
     return new Response('not found', { status: 404 });   // assets never reach here
   },
 

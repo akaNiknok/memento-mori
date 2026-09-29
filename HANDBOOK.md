@@ -40,6 +40,7 @@ Use `npx wrangler secret put <NAME>` in the `worker/` folder.
 | `INGEST_TOKEN` | The Apps Script jobs send this value. It must be the same as the script property of the same name. |
 | `IBKR_FLEX_TOKEN` | The token of the Flex Web Service. |
 | `IBKR_FLEX_QUERY_ID` | The id of the Flex query. |
+| `AI_READ_TOKEN` | Optional. An AI client sends this value to read the data through `/mcp`. It opens `/mcp` only, and it cannot write. If it is not set, `/mcp` is closed. Use a long random value. |
 
 For `npx wrangler dev`, put the same names in `worker/.dev.vars`. Git ignores this file.
 
@@ -129,6 +130,19 @@ permissions change.
 - **Gmail.** The courier searches for `in:inbox label:"Memento Mori"`. To add a bank or to remove a bank, change the Gmail filter that applies the label.
 - **Telegram.** To set the webhook, use the Telegram `setWebhook` method with the address `<worker>/tg`, the secret token, and the update types `message` and `callback_query`. The buttons do not operate without `callback_query`.
 - **IBKR.** In Client Portal, make a Flex Query that has the Open Positions section with the fields Symbol, Position, Mark Price and Currency. Enable the Flex Web Service, then make a token with the maximum validity.
+
+### AI clients
+
+The Worker gives an AI client read-only access at `<worker>/mcp`. The protocol is the Model Context Protocol (MCP). The client can read the summary, the accounts, the budgets, the investments, the debts and the transactions. It cannot write, delete or export the full database.
+
+1. Make a long random value, for example with `openssl rand -hex 32`.
+2. In `worker/`, run `npx wrangler secret put AI_READ_TOKEN` and paste the value.
+3. Connect the client:
+   - **Claude Code.** Run `claude mcp add --transport http memento-mori <worker>/mcp --header "Authorization: Bearer <value>"`. Do not add `--scope project`, because that scope writes the value into a file in the repository.
+   - **Claude Desktop.** Add a server to `claude_desktop_config.json` with the command `npx`, the arguments `mcp-remote`, `<worker>/mcp`, `--header` and `Authorization:${AUTH}`, and the variable `AUTH` set to `Bearer <value>`.
+4. Examine the Claude privacy settings. The data goes to the AI provider.
+
+Some transaction descriptions come from emails, and another person wrote that text. Use the connection in a session that has no tool that sends data out. `npm run tail` shows each tool that the AI used. To stop all access, run `npx wrangler secret delete AI_READ_TOKEN`.
 
 ## iPhone widgets
 
@@ -252,6 +266,7 @@ The code and the database do not go back together. Undo the code first.
 | The job does not record the emails. | The Gmail filter. Then the property `GMAIL_QUERY`, which replaces the label. Then the trigger, because Apps Script can disable it. Then the property `WORKER_URL` and the two `INGEST_TOKEN` values. |
 | The staging deploy fails. | The value `database_id` in the `[[env.staging.d1_databases]]` block of `worker/wrangler.toml`. A new checkout has a placeholder there. Make the database with `npx wrangler d1 create memento-mori-staging --location=apac`, then write the id into the file. |
 | The pull request does not merge. | The CI check on the pull request. Read the log of the failed job. The `main` branch accepts no merge before the check is green. |
+| The AI client gets `401` from `/mcp`. | The client sends a value that is not the same as the secret `AI_READ_TOKEN`, or the secret is not set. The app passphrase and `INGEST_TOKEN` do not open `/mcp`. |
 | The app asks for the passphrase frequently. | A person changed `APP_PASS`, or the cookie is more than one year old. |
 | The app shows "Storage is full" and does not save the entry. | The device has no free space for the offline queue. The app deletes the cached screens first, then makes a second attempt. This message means that the second attempt also failed. Delete files on the device. Then enter the transaction again, because the app did not record it. |
 | The app starts, but each request fails. | `npm run tail`. Usually the D1 binding or a secret is absent. |
