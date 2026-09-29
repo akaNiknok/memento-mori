@@ -99,7 +99,8 @@ Do these actions one time:
    **Branding**. Google does not publish without a homepage link and a privacy
    policy link. Give the address of this repository and of its `PRIVACY.md`, and
    add `github.com` under **Authorized domains**. Then open **Audience**, then
-   **Publish app**, then **Confirm**. Do not start the verification. At the
+   **Publish app**, then **Confirm**. Do not start the verification. Ignore the
+   banner "Your app requires verification" and the branding issues it lists. At the
    status `Testing`, Google cancels the permission after 7 days, and each
    trigger then fails with "Authorization is required to perform that action".
    An application that is not verified operates for a maximum of 100 users,
