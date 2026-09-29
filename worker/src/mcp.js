@@ -14,10 +14,13 @@
  * so someone else wrote some of this text. Use it in a session with no tool that sends
  * data out.
  *
+ *   * claude.ai (web and phone) cannot send a fixed header, so it gets an OAuth access
+ *     token instead (src/oauth.js). Its signing key derives from AI_READ_TOKEN, so the
+ *     one secret still closes both doors.
  * ponytail: stateless Streamable HTTP, tools only — every answer is one JSON body, no
- * SSE, no session id, no OAuth. claude.ai's web and mobile connectors need OAuth; add
- * @cloudflare/workers-oauth-provider only if the phone is ever the client.
+ * SSE, no session id.
  */
+import { verify } from './oauth.js';
 import { getDashboard, getAccounts, getBudgets, getInvestments, getDebts, listTransactions } from './api.js';
 
 const MONTH = { type: 'string', description: "Month key 'yyyy-MMM', e.g. '2026-Sep'. Omit for the current Manila month." };
@@ -79,8 +82,10 @@ const INSTRUCTIONS = 'Personal finance ledger. Amounts are PHP unless a field sa
 export async function mcp(request, env, open) {
   if (request.method !== 'POST') return new Response(null, { status: 405, headers: { Allow: 'POST' } });
   const bearer = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
-  if (!open && !(env.AI_READ_TOKEN && bearer === env.AI_READ_TOKEN)) {
-    return new Response('unauthorized', { status: 401, headers: { 'WWW-Authenticate': 'Bearer' } });
+  if (!open && !(env.AI_READ_TOKEN && (bearer === env.AI_READ_TOKEN || await verify(env, bearer, 'access')))) {
+    // resource_metadata is how an OAuth client finds /authorize from nothing but this URL.
+    const meta = new URL('/.well-known/oauth-protected-resource', request.url).href;
+    return new Response('unauthorized', { status: 401, headers: { 'WWW-Authenticate': `Bearer resource_metadata="${meta}"` } });
   }
   const msg = await request.json().catch(() => null);
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return reply(null, null, { code: -32700, message: 'Parse error' });
