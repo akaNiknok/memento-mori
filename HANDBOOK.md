@@ -40,7 +40,7 @@ Use `npx wrangler secret put <NAME>` in the `worker/` folder.
 | `INGEST_TOKEN` | The Apps Script jobs send this value. It must be the same as the script property of the same name. |
 | `IBKR_FLEX_TOKEN` | The token of the Flex Web Service. |
 | `IBKR_FLEX_QUERY_ID` | The id of the Flex query. |
-| `AI_READ_TOKEN` | Optional. An AI client sends this value to read the data through `/mcp`. It opens `/mcp` only, and it cannot write. If it is not set, `/mcp` is closed. Use a long random value. |
+| `AI_READ_TOKEN` | Optional. An AI client sends this value to read the data through `/mcp`. It opens `/mcp` only, and it cannot write. The OAuth tokens for claude.ai are signed with a key from this value. If it is not set, `/mcp` and the OAuth routes are closed. Use a long random value. |
 
 For `npx wrangler dev`, put the same names in `worker/.dev.vars`. Git ignores this file.
 
@@ -140,9 +140,12 @@ The Worker gives an AI client read-only access at `<worker>/mcp`. The protocol i
 3. Connect the client:
    - **Claude Code.** Run `claude mcp add --transport http memento-mori <worker>/mcp --header "Authorization: Bearer <value>"`. Do not add `--scope project`, because that scope writes the value into a file in the repository.
    - **Claude Desktop.** Add a server to `claude_desktop_config.json` with the command `npx`, the arguments `mcp-remote`, `<worker>/mcp`, `--header` and `Authorization:${AUTH}`, and the variable `AUTH` set to `Bearer <value>`.
+   - **claude.ai, on the web and on the phone.** On the web, open Settings, then Connectors, then **Add custom connector**. Type the address `<worker>/mcp` and leave the OAuth fields empty. A page of the Worker asks for the app passphrase. Enter it, then select **Allow read-only access**. The connector then shows in the phone app too.
 4. Examine the Claude privacy settings. The data goes to the AI provider.
 
-Some transaction descriptions come from emails, and another person wrote that text. Use the connection in a session that has no tool that sends data out. `npm run tail` shows each tool that the AI used. To stop all access, run `npx wrangler secret delete AI_READ_TOKEN`.
+Some transaction descriptions come from emails, and another person wrote that text. Use the connection in a session that has no tool that sends data out. `npm run tail` shows each tool that the AI used. To stop all access, run `npx wrangler secret delete AI_READ_TOKEN`. This also cancels each claude.ai connection, because a new value makes every OAuth token invalid.
+
+The claude.ai connection uses OAuth with no stored state. An access token is valid for 1 hour, and claude.ai gets a new one by itself. A refresh token is valid for 30 days after its last use. The Worker sends a code only to a Claude callback address.
 
 ## iPhone widgets
 
@@ -267,6 +270,8 @@ The code and the database do not go back together. Undo the code first.
 | The staging deploy fails. | The value `database_id` in the `[[env.staging.d1_databases]]` block of `worker/wrangler.toml`. A new checkout has a placeholder there. Make the database with `npx wrangler d1 create memento-mori-staging --location=apac`, then write the id into the file. |
 | The pull request does not merge. | The CI check on the pull request. Read the log of the failed job. The `main` branch accepts no merge before the check is green. |
 | The AI client gets `401` from `/mcp`. | The client sends a value that is not the same as the secret `AI_READ_TOKEN`, or the secret is not set. The app passphrase and `INGEST_TOKEN` do not open `/mcp`. |
+| claude.ai cannot add the connector, or it shows "invalid_redirect_uri". | Claude sent a callback address that the Worker does not know. The list of addresses is `CALLBACKS` in `worker/src/oauth.js`. Add the new address with a test. |
+| The claude.ai connector stops after 30 days with no use. | The refresh token expired. Connect again from the connector settings. |
 | The app asks for the passphrase frequently. | A person changed `APP_PASS`, or the cookie is more than one year old. |
 | The app shows "Storage is full" and does not save the entry. | The device has no free space for the offline queue. The app deletes the cached screens first, then makes a second attempt. This message means that the second attempt also failed. Delete files on the device. Then enter the transaction again, because the app did not record it. |
 | The app starts, but each request fails. | `npm run tail`. Usually the D1 binding or a secret is absent. |

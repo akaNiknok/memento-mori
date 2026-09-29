@@ -31,14 +31,15 @@ enabled = true
 head_sampling_rate = 1
 
 # The SPA. Asset requests bypass worker.js entirely and are free/unmetered, so only
-# the three routes below burn invocations.
+# the routes below burn invocations. /mcp and the OAuth routes (src/oauth.js) would reach
+# the Worker anyway, since no asset has their name; listing them keeps it that way.
 #
 # not_found_handling is deliberately left at the default: "single-page-application"
 # would answer /api with index.html instead of invoking the Worker. Screen routing is
 # on ?screen= query params, not paths, so there is nothing to fall back for.
 [assets]
 directory = "./public"
-run_worker_first = ["/api", "/login", "/tg"]
+run_worker_first = ["/api", "/login", "/tg", "/mcp", "/authorize", "/token", "/register", "/.well-known/*"]
 
 # The source of truth. --location=apac at creation time (nearest region to Manila).
 #   npx wrangler d1 create memento-mori --location=apac   -> paste the id below

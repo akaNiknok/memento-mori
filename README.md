@@ -52,7 +52,7 @@ All figures in the screenshots are invented. They come from `worker/seed.sql`, n
 - **Retirement countdown.** The Summary screen shows the time to financial independence as years and months. The target is 25 times the yearly expenses.
 - **Emergency runway.** The Summary screen shows how many months your liquid money can pay your average spend.
 - **iPhone widgets.** Four home-screen widgets show the latest transactions, three account balances, the net worth and the segment targets.
-- **Read-only AI access.** An AI client can read the data through the Model Context Protocol (MCP) at `/mcp`. It has its own token, and it cannot write.
+- **Read-only AI access.** An AI client can read the data through the Model Context Protocol (MCP) at `/mcp`. It has its own token, and it cannot write. The claude.ai app on the web and the phone connects through OAuth.
 - **Two more parts.** A nightly job reads the share prices from Interactive Brokers. A Tax screen collects the data for the Philippine BIR 8 percent regime.
 
 ## How it grew
@@ -148,7 +148,7 @@ Each lesson comes from a real failure or a real measurement.
 | Frontend | approximately 5 130 lines, no framework and no bundler |
 | Apps Script | approximately 400 lines in 3 files, mail and backup only |
 | Dependencies | none at runtime, one for development |
-| Tests | 155 tests operate offline with `npm test`, and 109 of them use a real SQLite database |
+| Tests | 156 tests operate offline with `npm test`, and 110 of them use a real SQLite database |
 | Releases | 87 tagged versions, each one from one merge |
 | Transactions | more than 1 200 |
 | Monthly cost | none |

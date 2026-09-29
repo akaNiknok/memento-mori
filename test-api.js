@@ -1654,6 +1654,83 @@ function d1(db) {
       assert.strictEqual((await call('/mcp', { headers: ai })).status, 405);
     });
 
+    test('/mcp OAuth: discovery, consent, PKCE, refresh, and one kill switch', async () => {
+      // The door claude.ai uses on the web and the phone. Everything is signed with a key
+      // from AI_READ_TOKEN, so the tests below end by rotating it.
+      const b64u = (b) => Buffer.from(b).toString('base64url');
+      const verifier = 'v'.repeat(50);
+      const challenge = b64u(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+      const cb = 'https://claude.ai/api/mcp/auth_callback';
+      const raw = (u, init) => worker.fetch(new Request('https://x' + u, init), wenv, ctx);
+      const form = (o) => ({ method: 'POST', body: new URLSearchParams(o).toString(),
+                             headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+
+      // Discovery from nothing but the /mcp URL.
+      const deny = await raw('/mcp', { method: 'POST', body: '{}' });
+      assert.match(deny.headers.get('WWW-Authenticate'), /resource_metadata="https:\/\/x\/\.well-known\/oauth-protected-resource"/);
+      const prm = await (await raw('/.well-known/oauth-protected-resource')).json();
+      assert.deepStrictEqual(prm.authorization_servers, ['https://x']);
+      const asm = await (await raw('/.well-known/oauth-authorization-server')).json();
+      assert.deepStrictEqual(asm.code_challenge_methods_supported, ['S256']);
+
+      // Registration: Claude's callback only.
+      const reg = (uris) => raw('/register', { method: 'POST', body: JSON.stringify({ redirect_uris: uris }) });
+      assert.strictEqual((await reg([cb])).status, 201);
+      assert.strictEqual((await reg(['https://evil.example/cb'])).status, 400);
+      assert.strictEqual((await reg([cb, 'https://evil.example/cb'])).status, 400);
+
+      // Consent. A foreign redirect is never followed, even with the right passphrase.
+      const q = { response_type: 'code', client_id: 'claude', redirect_uri: cb, state: 's<1>',
+                  code_challenge: challenge, code_challenge_method: 'S256' };
+      const pageRes = await raw('/authorize?' + new URLSearchParams(q));
+      assert.strictEqual(pageRes.status, 200);
+      assert.strictEqual(pageRes.headers.get('X-Frame-Options'), 'DENY');
+      assert.ok((await pageRes.text()).includes('value="s&lt;1&gt;"'), 'state is escaped into the form');
+      const evil = await raw('/authorize', form(Object.assign({}, q, { redirect_uri: 'https://evil.example/cb', pass: 'pw' })));
+      assert.strictEqual(evil.status, 400);
+      assert.strictEqual(evil.headers.get('Location'), null);
+      assert.strictEqual((await raw('/authorize', form(Object.assign({}, q, { pass: 'nope' })))).status, 401);
+      assert.strictEqual((await raw('/authorize', form(Object.assign({}, q, { code_challenge_method: 'plain', pass: 'pw' })))).status, 400);
+      const ok = await raw('/authorize', form(Object.assign({}, q, { pass: 'pw' })));
+      assert.strictEqual(ok.status, 302);
+      const loc = new URL(ok.headers.get('Location'));
+      assert.strictEqual(loc.origin + loc.pathname, cb);
+      assert.strictEqual(loc.searchParams.get('state'), 's<1>');
+      const code = loc.searchParams.get('code');
+
+      // Token exchange: the verifier and the redirect must both match.
+      const tok = (o) => raw('/token', form(o));
+      const exch = { grant_type: 'authorization_code', code, redirect_uri: cb, code_verifier: verifier };
+      assert.strictEqual((await tok(Object.assign({}, exch, { code_verifier: 'w'.repeat(50) }))).status, 400);
+      assert.strictEqual((await tok(Object.assign({}, exch, { redirect_uri: 'https://claude.com/api/mcp/auth_callback' }))).status, 400);
+      const t = await (await tok(exch)).json();
+      assert.strictEqual(t.token_type, 'Bearer');
+
+      const list = { jsonrpc: '2.0', id: 1, method: 'tools/list' };
+      const mcpWith = (bearer) => call('/mcp', { method: 'POST', body: JSON.stringify(list),
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + bearer } });
+      assert.strictEqual((await mcpWith(t.access_token)).status, 200);
+      // A token is only ever its own kind, and never a key to /api.
+      assert.strictEqual((await mcpWith(t.refresh_token)).status, 401);
+      assert.strictEqual((await mcpWith(code)).status, 401);
+      assert.strictEqual((await mcpWith(t.access_token.slice(0, -2) + 'AA')).status, 401, 'a forged signature');
+      assert.strictEqual((await call('/api?action=getAccounts', { headers: { Authorization: 'Bearer ' + t.access_token } })).status, 401);
+      assert.strictEqual((await tok({ grant_type: 'refresh_token', refresh_token: t.access_token })).status, 400);
+
+      // Refresh gives a working pair.
+      const t2 = await (await tok({ grant_type: 'refresh_token', refresh_token: t.refresh_token })).json();
+      assert.strictEqual((await mcpWith(t2.access_token)).status, 200);
+
+      // Rotating AI_READ_TOKEN voids every token issued under the old one; unset, the routes are gone.
+      wenv.AI_READ_TOKEN = 'rotated';
+      try {
+        assert.strictEqual((await mcpWith(t2.access_token)).status, 401);
+        assert.strictEqual((await tok({ grant_type: 'refresh_token', refresh_token: t2.refresh_token })).status, 400);
+        delete wenv.AI_READ_TOKEN;
+        assert.strictEqual((await raw('/.well-known/oauth-authorization-server')).status, 404);
+      } finally { wenv.AI_READ_TOKEN = 'ai'; }
+    });
+
     test('a wrangler dev host is open; a deployed host is not', async () => {
       // The passphrase guards the deployed app. Locally it only blocked the agents and
       // the fresh checkouts that have no worker/.dev.vars, and Cloudflare cannot route

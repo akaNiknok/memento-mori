@@ -13,6 +13,7 @@
  *                  anyway is re-run from D1 by the 2-minute drain cron (v2.12.0).
  *   POST /login  — passphrase -> sha256(APP_PASS) cookie (HttpOnly/Secure/Lax, 1yr).
  *   POST /mcp    — read-only MCP for AI clients, own token AI_READ_TOKEN (src/mcp.js).
+ *   /authorize, /token, /register, /.well-known/oauth-* — OAuth for /mcp (src/oauth.js).
  *   GET|POST /api — the JSON API. GET = reads, POST = writes; the split comes from the
  *                  handler name's get…/list… prefix, which is also how the SPA's gs()
  *                  picks its method, so there is exactly one list to keep in sync.
@@ -43,6 +44,7 @@ import {
 import { handleUpdate, ingestEmail } from './src/telegram.js';
 import { runScheduled } from './src/jobs.js';
 import { mcp } from './src/mcp.js';
+import { oauth, OAUTH_PATHS } from './src/oauth.js';
 
 const COOKIE = 'mm_auth';
 
@@ -88,6 +90,7 @@ export default {
     if (url.pathname === '/login') return login(request, env);
     if (url.pathname === '/api') return api(request, env, url);
     if (url.pathname === '/mcp') return mcp(request, env, isLocalDev(url));
+    if (OAUTH_PATHS.includes(url.pathname)) return oauth(request, env, url);
     return new Response('not found', { status: 404 });   // assets never reach here
   },
 
