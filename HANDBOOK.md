@@ -95,7 +95,10 @@ Do these actions one time:
    **number**, not the project id. Apps Script asks for the number.
 2. In that project, open **APIs & Services**, then **OAuth consent screen**.
    Select **External**. Give an application name and your own email address.
-3. **Set the publishing status to `In production`.** Open **Audience**, then
+3. **Set the publishing status to `In production`.** First complete the page
+   **Branding**. Google does not publish without a homepage link and a privacy
+   policy link. Give the address of this repository and of its `PRIVACY.md`, and
+   add `github.com` under **Authorized domains**. Then open **Audience**, then
    **Publish app**, then **Confirm**. Do not start the verification. At the
    status `Testing`, Google cancels the permission after 7 days, and each
    trigger then fails with "Authorization is required to perform that action".
