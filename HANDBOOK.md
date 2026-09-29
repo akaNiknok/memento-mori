@@ -82,7 +82,7 @@ The `meta` table holds the settings that were script properties before. Change t
 
 Cloudflare does not do a job again after a failure. Thus each job sends a Telegram message if it fails. Apps Script disables a trigger after a number of failures.
 
-**Set the Apps Script failure notification.** Open the page **Triggers**, then the menu of the `gmail_ingest` trigger, then **Failure notification settings**, then **Notify me immediately**. Apps Script then sends an email each time the trigger fails. Without it, a failure is visible only on the page **Executions**.
+**Set the Apps Script failure notification.** Open the page **Triggers**, then the menu of the `gmail_ingest` trigger, then **Failure notification settings**, then **Notify me hourly**. Apps Script then sends one email each hour that has a failure. Without it, a failure is visible only on the page **Executions**. Do not use **Notify me immediately** for this trigger. It operates each 5 minutes, so a failure that continues sends 12 emails each hour. A late email causes no loss: a failed run does not move the watermark, and the next run reads the same mail again. A single "server error occurred" failure is a temporary Google fault. The next run corrects it.
 
 **Attach a standard Google Cloud project.** This is necessary, not optional. The
 backup writes a file with `DriveApp`, and `DriveApp` needs the **Google Drive API**
@@ -114,7 +114,8 @@ Do these actions one time:
 6. The change of project cancels every permission. Open the editor, run
    `backup_run`, and accept the screen. Do the same for `gmail_ingest`.
 7. Set the failure notification of the `backup_run` trigger to **Notify me
-   immediately**, as for `gmail_ingest`. Do not omit this. It is the only thing
+   immediately**. This trigger operates one time each night, so it sends a
+   maximum of one email each day. Do not omit this. It is the only thing
    that makes a dead trigger visible. See the note below.
 8. Examine the page **Executions** the next morning. The nightly backup must
    show **Completed**, and the file **Memento Mori Backup.json** must be in
@@ -290,7 +291,7 @@ The code and the database do not go back together. Undo the code first.
 3. Set each Worker secret, then run `npm run deploy`.
 4. Make the bot with BotFather, then set the webhook to `<worker>/tg`.
 5. Make the Gmail label and the Gmail filter.
-6. Make an Apps Script project. Run `clasp login`, then put the script id in `.clasp.json`. Enable the Apps Script API one time at script.google.com/home/usersettings. The first push fails without it. Run `npm run push`. Set the script properties. Add the `gmail_ingest` trigger, then run `backup_install()`. Set the failure notification of the trigger to **Notify me immediately**.
+6. Make an Apps Script project. Run `clasp login`, then put the script id in `.clasp.json`. Enable the Apps Script API one time at script.google.com/home/usersettings. The first push fails without it. Run `npm run push`. Set the script properties. Add the `gmail_ingest` trigger, then run `backup_install()`. Set the failure notification of `gmail_ingest` to **Notify me hourly** and of `backup_run` to **Notify me immediately**.
 7. Make the IBKR Flex query and token.
 8. Open the app, then put the accounts, the categories and the budgets in the **Admin** screen.
 
