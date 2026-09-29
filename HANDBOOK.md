@@ -95,13 +95,13 @@ Do these actions one time:
    **number**, not the project id. Apps Script asks for the number.
 2. In that project, open **APIs & Services**, then **OAuth consent screen**.
    Select **External**. Give an application name and your own email address.
-3. **Keep the publishing status at `Testing`.** Add your own address under
-   **Test users**. Do not publish the application. `DriveApp` uses the scope
-   `/auth/drive`, which Google classifies as restricted, so a published
-   application needs a privacy policy, terms of service and a security
-   assessment. That cost is not correct for a private script with one user.
-   The consent screen says the application is not verified: open **Advanced**,
-   then **Go to (unsafe)**.
+3. **Set the publishing status to `In production`.** Open **Audience**, then
+   **Publish app**, then **Confirm**. Do not start the verification. At the
+   status `Testing`, Google cancels the permission after 7 days, and each
+   trigger then fails with "Authorization is required to perform that action".
+   An application that is not verified operates for a maximum of 100 users,
+   and this script has one. The consent screen says the application is not
+   verified: open **Advanced**, then **Go to (unsafe)**.
 4. In that project, open **APIs & Services**, then **Library**. Enable
    **Google Drive API**.
 5. In Apps Script, open **Project Settings**, then **Google Cloud Platform (GCP)
@@ -118,13 +118,6 @@ Do these actions one time:
 The script, the triggers and the script properties do not change. Only the
 permissions change.
 
-**Watch the first 10 days.** Google cancels a refresh token after 7 days for an
-application at the status `Testing`. Reports do not agree about whether this
-also stops an Apps Script trigger, because a trigger does not use a refresh
-token in the same way. The failure notification in step 7 gives the answer: if
-the backup stops near day 7, the repair is to remove `DriveApp`. Then the backup
-sends the same JSON as an email attachment, which needs no Google Cloud project,
-no Drive API and no new permission.
 
 ### Gmail, Telegram and IBKR
 
@@ -251,8 +244,7 @@ The code and the database do not go back together. Undo the code first.
 | The buttons do not operate. | Set the webhook again. The permitted update types do not include `callback_query`. |
 | An email stays in the inbox, and the transaction is absent. | The courier tries a failed email again for 3 hours, thus wait 10 minutes first. Then read the Worker logs for the line `ingestEmail:`. A message there names the cause, and it is usually the Gemini quota. To make the courier read the email again after that, delete the script property `GMAIL_LAST_TS`. The row identifier is deterministic, thus a transaction that is already recorded does not become double. |
 | The backup fails with "Permission denied while enabling APIs: drive". | Apps Script tried to enable the **Google Drive API** and it has no permission. This happens on a default Apps Script project, which does not let a person enable an API. Attach a standard Google Cloud project and enable the Drive API there. The task above gives each action. |
-| The backup stops near day 7 after the Google Cloud project was attached. | Google cancelled the refresh token, because the consent screen is at the status `Testing`. Do not publish the application to repair this: `DriveApp` uses a restricted scope, so a published application needs a privacy policy, terms of service and a security assessment. Remove `DriveApp` instead. The backup then sends the same JSON as an email attachment with `MailApp`, which needs no Google Cloud project and no new permission. |
-| A trigger fails with "Authorization is required to perform that action." | `npm run push` changed which files the Apps Script project holds, thus Apps Script calculated the list of permissions again. A list that changes makes the permission of each existing trigger old. **The repair is one action.** Open the editor, select `gmail_ingest`, press **Run**, then accept the screen that asks for permission. The trigger operates again at the next tick. Do the same for `backup_run`. |
+| A trigger fails with "Authorization is required to perform that action." | There are two causes. ① The consent screen of the Google Cloud project is at the status `Testing`, and Google cancels the permission each 7 days. Set it to `In production` (step 3 of the task above). ② `npm run push` changed which files the Apps Script project holds, thus Apps Script calculated the list of permissions again. For both causes, the repair ends with one action: open the editor, select `gmail_ingest`, press **Run**, then accept the screen. Do the same for `backup_run`. The triggers operate again at the next tick. |
 | The job does not record the emails. | The Gmail filter. Then the property `GMAIL_QUERY`, which replaces the label. Then the trigger, because Apps Script can disable it. Then the property `WORKER_URL` and the two `INGEST_TOKEN` values. |
 | The staging deploy fails. | The value `database_id` in the `[[env.staging.d1_databases]]` block of `worker/wrangler.toml`. A new checkout has a placeholder there. Make the database with `npx wrangler d1 create memento-mori-staging --location=apac`, then write the id into the file. |
 | The pull request does not merge. | The CI check on the pull request. Read the log of the failed job. The `main` branch accepts no merge before the check is green. |
