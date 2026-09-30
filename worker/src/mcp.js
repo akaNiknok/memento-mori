@@ -21,10 +21,16 @@
  * SSE, no session id.
  */
 import { verify } from './oauth.js';
-import { getDashboard, getAccounts, getBudgets, getInvestments, getDebts, listTransactions } from './api.js';
+import { getDashboard, getAccounts, getBudgets, getInvestments, getDebts, getCategories, listTransactions } from './api.js';
 
-const MONTH = { type: 'string', description: "Month key 'yyyy-MMM', e.g. '2026-Sep'. Omit for the current Manila month." };
+// A `pattern` is checked before the handler runs, so a malformed filter is an error and
+// never a silent empty result ("Sep 2026" matched no rows and read as zero spend).
+const MONTH = { type: 'string', pattern: '^\\d{4}-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)$',
+  description: "Month key 'yyyy-MMM', e.g. '2026-Sep'. Omit for the current Manila month." };
+const DATE = (note) => ({ type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: 'yyyy-MM-dd' + note });
 const MAX_TX = 200;
+// Tools-only is the same wire shape in each of these; an unknown ask gets the newest.
+const PROTOCOLS = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05'];
 
 export const TOOLS = {
   get_dashboard: {
@@ -48,6 +54,12 @@ export const TOOLS = {
     description: 'Positions (quantity, price, PHP value), average-cost basis, trade history and the quarterly buy pulse.',
     props: {}
   },
+  get_categories: {
+    fn: getCategories,
+    description: 'Every category name with its type, segment and description. The descriptions ' +
+      'say how money is filed; the names are what list_transactions takes.',
+    props: {}
+  },
   get_debts: {
     fn: getDebts,
     description: 'Receivable accounts itemised into the individual debts still open.',
@@ -59,11 +71,13 @@ export const TOOLS = {
       'whole filtered set, not just the page. Page with offset.',
     props: {
       month: MONTH,
-      date: { type: 'string', description: 'yyyy-MM-dd' },
-      account: { type: 'string' }, category: { type: 'string', description: "e.g. 'Expense: Food'" },
+      date: DATE(', one day.'), from: DATE(', inclusive.'), to: DATE(', inclusive.'),
+      account: { type: 'string' }, category: { type: 'string', description: "e.g. 'Expense: Food'; get_categories lists them." },
       segment: { type: 'string' }, type: { type: 'string', enum: ['Income', 'Expense', 'Transfer'] },
       search: { type: 'string', description: 'Substring of description or category.' },
       minAmount: { type: 'number', description: 'PHP magnitude.' }, maxAmount: { type: 'number' },
+      source: { type: 'string', enum: ['tg', 'gm', 'ui', 'interest', 'legacy'],
+        description: 'Where the row came from: tg = Telegram bot, gm = Gmail ingest, ui = the app, legacy = the sheet era.' },
       limit: { type: 'integer', description: 'Max ' + MAX_TX + '. Default 100.' }, offset: { type: 'integer' }
     }
   }
@@ -94,8 +108,7 @@ export async function mcp(request, env, open) {
   switch (msg.method) {
     case 'initialize':
       return reply(msg.id, {
-        // Tools-only is the same wire shape in every revision, so echo what the client asked for.
-        protocolVersion: p.protocolVersion || '2025-06-18',
+        protocolVersion: PROTOCOLS.includes(p.protocolVersion) ? p.protocolVersion : PROTOCOLS[0],
         capabilities: { tools: {} },
         serverInfo: { name: 'memento-mori', version: '1' },
         instructions: INSTRUCTIONS
@@ -113,8 +126,10 @@ export async function mcp(request, env, open) {
       if (!t) return reply(msg.id, null, { code: -32602, message: 'Unknown tool: ' + p.name });
       const args = {};
       for (const k of Object.keys(t.props)) if (p.arguments && p.arguments[k] != null) args[k] = p.arguments[k];
+      const bad = Object.keys(args).find((k) => t.props[k].pattern && !new RegExp(t.props[k].pattern).test(String(args[k])));
+      if (bad) return reply(msg.id, { isError: true, content: [{ type: 'text', text: `${bad} must match ${t.props[bad].pattern}` }] });
       if (t.fn === listTransactions) args.limit = Math.min(MAX_TX, Number(args.limit) || 100);
-      console.log('mcp ' + p.name + ' ' + JSON.stringify(args));   // `npm run tail` is the audit log
+      console.log('mcp ' + p.name + ' ' + JSON.stringify(args));   // the audit log: Workers Logs keeps it, `npm run tail` shows it live
       try {
         return reply(msg.id, { content: [{ type: 'text', text: JSON.stringify(await t.fn(args, env)) }] });
       } catch (err) {

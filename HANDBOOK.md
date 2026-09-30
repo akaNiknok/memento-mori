@@ -134,7 +134,7 @@ permissions change.
 
 ### AI clients
 
-The Worker gives an AI client read-only access at `<worker>/mcp`. The protocol is the Model Context Protocol (MCP). The client can read the summary, the accounts, the budgets, the investments, the debts and the transactions. It cannot write, delete or export the full database.
+The Worker gives an AI client read-only access at `<worker>/mcp`. The protocol is the Model Context Protocol (MCP). The client can read the summary, the accounts, the categories, the budgets, the investments, the debts and the transactions. It cannot write, delete or export the full database.
 
 1. Make a long random value, for example with `openssl rand -hex 32`.
 2. In `worker/`, run `npx wrangler secret put AI_READ_TOKEN` and paste the value.
@@ -144,9 +144,9 @@ The Worker gives an AI client read-only access at `<worker>/mcp`. The protocol i
    - **claude.ai, on the web and on the phone.** On the web, open Settings, then Connectors, then **Add custom connector**. Type the address `<worker>/mcp` and leave the OAuth fields empty. A page of the Worker asks for the app passphrase. Enter it, then select **Allow read-only access**. The connector then shows in the phone app too.
 4. Examine the Claude privacy settings. The data goes to the AI provider.
 
-Some transaction descriptions come from emails, and another person wrote that text. Use the connection in a session that has no tool that sends data out. `npm run tail` shows each tool that the AI used. To stop all access, run `npx wrangler secret delete AI_READ_TOKEN`. This also cancels each claude.ai connection, because a new value makes every OAuth token invalid.
+Some transaction descriptions come from emails, and another person wrote that text. Use the connection in a session that has no tool that sends data out. Workers Logs in the Cloudflare dashboard keeps a record of each tool that the AI used. `npm run tail` shows the same record live. To stop all access, run `npx wrangler secret delete AI_READ_TOKEN`. This also cancels each claude.ai connection, because a new value makes every OAuth token invalid.
 
-The claude.ai connection uses OAuth with no stored state. An access token is valid for 1 hour, and claude.ai gets a new one by itself. A refresh token is valid for 30 days after its last use. The Worker sends a code only to a Claude callback address.
+The claude.ai connection uses OAuth with no stored state. An access token is valid for 1 hour, and claude.ai gets a new one by itself. A refresh token is valid for 30 days after its last use. Each connection stops 90 days after you entered the passphrase, even with daily use. Then you connect again. The Worker sends a code only to a Claude callback address.
 
 ## iPhone widgets
 
@@ -272,7 +272,7 @@ The code and the database do not go back together. Undo the code first.
 | The pull request does not merge. | The CI check on the pull request. Read the log of the failed job. The `main` branch accepts no merge before the check is green. |
 | The AI client gets `401` from `/mcp`. | The client sends a value that is not the same as the secret `AI_READ_TOKEN`, or the secret is not set. The app passphrase and `INGEST_TOKEN` do not open `/mcp`. |
 | claude.ai cannot add the connector, or it shows "invalid_redirect_uri". | Claude sent a callback address that the Worker does not know. The list of addresses is `CALLBACKS` in `worker/src/oauth.js`. Add the new address with a test. |
-| The claude.ai connector stops after 30 days with no use. | The refresh token expired. Connect again from the connector settings. |
+| The claude.ai connector stops after 30 days with no use, or 90 days after you connected. | The refresh token expired, or the 90-day limit ended the connection. Connect again from the connector settings. |
 | The app asks for the passphrase frequently. | A person changed `APP_PASS`, or the cookie is more than one year old. |
 | The app shows "Storage is full" and does not save the entry. | The device has no free space for the offline queue. The app deletes the cached screens first, then makes a second attempt. This message means that the second attempt also failed. Delete files on the device. Then enter the transaction again, because the app did not record it. |
 | The app starts, but each request fails. | `npm run tail`. Usually the D1 binding or a secret is absent. |
