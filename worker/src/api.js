@@ -345,6 +345,15 @@ export async function getDebts(args, env) {
   }) };
 }
 
+/** Every category with its type, segment and description. The descriptions carry the
+ * filing conventions (Growth, refunds, EF), so an AI reader gets what the Gemini prompt gets. */
+export async function getCategories(args, env) {
+  const r = await refs(env);
+  return { status: 'success', categories: r.categories.map((c) => ({
+    name: c.name, type: c.type || null, segment: c.segment || null, description: c.description || null
+  })) };
+}
+
 export async function getRecurring(args, env) {
   const rows = (await env.DB.prepare('SELECT * FROM recurring ORDER BY id').all()).results;
   return { status: 'success', rows: rows.map((r) => ({
@@ -366,8 +375,20 @@ export async function listTransactions(args, env) {
   if (args.id) add('t.id = ?', String(args.id));
   if (args.month) add('t.month = ?', String(args.month));
   if (args.date) add('t.date = ?', String(args.date));
-  if (args.account) add('(a.name = ? OR ta.name = ?)', String(args.account), String(args.account));
-  if (args.category) add('c.name = ?', String(args.category));
+  if (args.from) add('t.date >= ?', String(args.from));
+  if (args.to) add('t.date <= ?', String(args.to));
+  // A name nobody has resolves to an error, not an empty page: an AI caller that guesses
+  // "Food" for "Expense: Food" must not read zero rows as zero spend (2026-09-30).
+  if (args.account) {
+    const a = resolveAccount(r, String(args.account));
+    if (!a) throw new Error('Unknown account: ' + args.account);
+    add('(t.account_id = ? OR t.to_account_id = ?)', a.id, a.id);
+  }
+  if (args.category) {
+    const c = resolveCategory(r, String(args.category));
+    if (!c) throw new Error('Unknown category: ' + args.category + '. get_categories lists them.');
+    add('t.category_id = ?', c.id);
+  }
   if (args.segment) add('c.segment = ?', String(args.segment));
   if (args.type) add('c.type = ?', String(args.type));
   // The v1 haystack was Description + " " + Category, matched as one string — keep it

@@ -1,6 +1,6 @@
 {
   "name": "memento-mori",
-  "version": "3.5.0",
+  "version": "3.6.0",
   "description": "Personal finance tracker: Cloudflare Worker + D1, a PWA, and a Telegram bot",
   "private": true,
   "scripts": {

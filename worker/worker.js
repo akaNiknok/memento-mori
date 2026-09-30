@@ -36,7 +36,7 @@
  * Bindings: DB (D1), FX_CACHE (KV, optional — unbound just means every FX lookup fetches).
  */
 import {
-  getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getRecurring,
+  getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getRecurring, getCategories,
   getLedger, listTransactions, getDebts, listTable, getExportAll, getWidget, getParse, setWidgetAccounts, setSmartLists,
   createTransaction, createTransfer, updateTransaction, deleteTransaction, updateAccount,
   bulkUpdateTransactions, bulkDeleteTransactions, updateTableCell, insertTableRow, deleteTableRow
@@ -54,7 +54,7 @@ const COOKIE = 'mm_auth';
  * test.js fails the build if a route is ever named against the rule.
  */
 export const ROUTES_READ = {
-  getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getRecurring,
+  getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getRecurring, getCategories,
   getLedger, listTransactions,
   getDebts,         // open debts per receivable account
   listTable,        // admin grid

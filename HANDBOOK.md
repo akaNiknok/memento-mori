@@ -82,7 +82,7 @@ The `meta` table holds the settings that were script properties before. Change t
 
 Cloudflare does not do a job again after a failure. Thus each job sends a Telegram message if it fails. Apps Script disables a trigger after a number of failures.
 
-**Set the Apps Script failure notification.** Open the page **Triggers**, then the menu of the `gmail_ingest` trigger, then **Failure notification settings**, then **Notify me immediately**. Apps Script then sends an email each time the trigger fails. Without it, a failure is visible only on the page **Executions**.
+**Set the Apps Script failure notification.** Open the page **Triggers**, then the menu of the `gmail_ingest` trigger, then **Failure notification settings**, then **Notify me hourly**. Apps Script then sends one email each hour that has a failure. Without it, a failure is visible only on the page **Executions**. Do not use **Notify me immediately** for this trigger. It operates each 5 minutes, so a failure that continues sends 12 emails each hour. A late email causes no loss: a failed run does not move the watermark, and the next run reads the same mail again. A single "server error occurred" failure is a temporary Google fault. The next run corrects it.
 
 **Attach a standard Google Cloud project.** This is necessary, not optional. The
 backup writes a file with `DriveApp`, and `DriveApp` needs the **Google Drive API**
@@ -114,7 +114,8 @@ Do these actions one time:
 6. The change of project cancels every permission. Open the editor, run
    `backup_run`, and accept the screen. Do the same for `gmail_ingest`.
 7. Set the failure notification of the `backup_run` trigger to **Notify me
-   immediately**, as for `gmail_ingest`. Do not omit this. It is the only thing
+   immediately**. This trigger operates one time each night, so it sends a
+   maximum of one email each day. Do not omit this. It is the only thing
    that makes a dead trigger visible. See the note below.
 8. Examine the page **Executions** the next morning. The nightly backup must
    show **Completed**, and the file **Memento Mori Backup.json** must be in
@@ -133,7 +134,7 @@ permissions change.
 
 ### AI clients
 
-The Worker gives an AI client read-only access at `<worker>/mcp`. The protocol is the Model Context Protocol (MCP). The client can read the summary, the accounts, the budgets, the investments, the debts and the transactions. It cannot write, delete or export the full database.
+The Worker gives an AI client read-only access at `<worker>/mcp`. The protocol is the Model Context Protocol (MCP). The client can read the summary, the accounts, the categories, the budgets, the investments, the debts and the transactions. It cannot write, delete or export the full database.
 
 1. Make a long random value, for example with `openssl rand -hex 32`.
 2. In `worker/`, run `npx wrangler secret put AI_READ_TOKEN` and paste the value.
@@ -143,9 +144,9 @@ The Worker gives an AI client read-only access at `<worker>/mcp`. The protocol i
    - **claude.ai, on the web and on the phone.** On the web, open Settings, then Connectors, then **Add custom connector**. Type the address `<worker>/mcp` and leave the OAuth fields empty. A page of the Worker asks for the app passphrase. Enter it, then select **Allow read-only access**. The connector then shows in the phone app too.
 4. Examine the Claude privacy settings. The data goes to the AI provider.
 
-Some transaction descriptions come from emails, and another person wrote that text. Use the connection in a session that has no tool that sends data out. `npm run tail` shows each tool that the AI used. To stop all access, run `npx wrangler secret delete AI_READ_TOKEN`. This also cancels each claude.ai connection, because a new value makes every OAuth token invalid.
+Some transaction descriptions come from emails, and another person wrote that text. Use the connection in a session that has no tool that sends data out. Workers Logs in the Cloudflare dashboard keeps a record of each tool that the AI used. `npm run tail` shows the same record live. To stop all access, run `npx wrangler secret delete AI_READ_TOKEN`. This also cancels each claude.ai connection, because a new value makes every OAuth token invalid.
 
-The claude.ai connection uses OAuth with no stored state. An access token is valid for 1 hour, and claude.ai gets a new one by itself. A refresh token is valid for 30 days after its last use. The Worker sends a code only to a Claude callback address.
+The claude.ai connection uses OAuth with no stored state. An access token is valid for 1 hour, and claude.ai gets a new one by itself. A refresh token is valid for 30 days after its last use. Each connection stops 90 days after you entered the passphrase, even with daily use. Then you connect again. The Worker sends a code only to a Claude callback address.
 
 ## iPhone widgets
 
@@ -271,7 +272,7 @@ The code and the database do not go back together. Undo the code first.
 | The pull request does not merge. | The CI check on the pull request. Read the log of the failed job. The `main` branch accepts no merge before the check is green. |
 | The AI client gets `401` from `/mcp`. | The client sends a value that is not the same as the secret `AI_READ_TOKEN`, or the secret is not set. The app passphrase and `INGEST_TOKEN` do not open `/mcp`. |
 | claude.ai cannot add the connector, or it shows "invalid_redirect_uri". | Claude sent a callback address that the Worker does not know. The list of addresses is `CALLBACKS` in `worker/src/oauth.js`. Add the new address with a test. |
-| The claude.ai connector stops after 30 days with no use. | The refresh token expired. Connect again from the connector settings. |
+| The claude.ai connector stops after 30 days with no use, or 90 days after you connected. | The refresh token expired, or the 90-day limit ended the connection. Connect again from the connector settings. |
 | The app asks for the passphrase frequently. | A person changed `APP_PASS`, or the cookie is more than one year old. |
 | The app shows "Storage is full" and does not save the entry. | The device has no free space for the offline queue. The app deletes the cached screens first, then makes a second attempt. This message means that the second attempt also failed. Delete files on the device. Then enter the transaction again, because the app did not record it. |
 | The app starts, but each request fails. | `npm run tail`. Usually the D1 binding or a secret is absent. |
@@ -290,7 +291,7 @@ The code and the database do not go back together. Undo the code first.
 3. Set each Worker secret, then run `npm run deploy`.
 4. Make the bot with BotFather, then set the webhook to `<worker>/tg`.
 5. Make the Gmail label and the Gmail filter.
-6. Make an Apps Script project. Run `clasp login`, then put the script id in `.clasp.json`. Enable the Apps Script API one time at script.google.com/home/usersettings. The first push fails without it. Run `npm run push`. Set the script properties. Add the `gmail_ingest` trigger, then run `backup_install()`. Set the failure notification of the trigger to **Notify me immediately**.
+6. Make an Apps Script project. Run `clasp login`, then put the script id in `.clasp.json`. Enable the Apps Script API one time at script.google.com/home/usersettings. The first push fails without it. Run `npm run push`. Set the script properties. Add the `gmail_ingest` trigger, then run `backup_install()`. Set the failure notification of `gmail_ingest` to **Notify me hourly** and of `backup_run` to **Notify me immediately**.
 7. Make the IBKR Flex query and token.
 8. Open the app, then put the accounts, the categories and the budgets in the **Admin** screen.
 

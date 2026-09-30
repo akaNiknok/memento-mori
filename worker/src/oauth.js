@@ -22,11 +22,15 @@
  * ponytail: stateless codes are replayable until they expire (2 minutes). PKCE makes a
  * replay useless without the verifier, which only the client that started the flow has.
  * A KV "used" flag would close it; add one only if a second kind of client ever appears.
+ * A refresh returns a new refresh token, but the old one stays valid until it expires:
+ * nothing is stored, so nothing can be revoked. What stops a stolen one renewing itself
+ * forever is `auth`, the time the owner typed the passphrase. Every token carries it
+ * forward unchanged and /token refuses past CONSENT_TTL, so the owner consents again.
  * ponytail: CALLBACKS is Claude's only. Another client (ChatGPT, a local one) = add its
  * exact callback here, with a test.
  */
 const CALLBACKS = ['https://claude.ai/api/mcp/auth_callback', 'https://claude.com/api/mcp/auth_callback'];
-const CODE_TTL = 120, ACCESS_TTL = 3600, REFRESH_TTL = 30 * 86400;   // seconds; a refresh rotates
+const CODE_TTL = 120, ACCESS_TTL = 3600, REFRESH_TTL = 30 * 86400, CONSENT_TTL = 90 * 86400;   // seconds
 
 const enc = new TextEncoder();
 const now = () => Math.floor(Date.now() / 1000);
@@ -104,7 +108,7 @@ async function authorize(request, env, url) {
   }
   if (request.method !== 'POST') return page(q, '', 200, true);
   if (p.get('pass') !== env.APP_PASS) return page(q, 'Wrong passphrase', 401, true);
-  const code = await sign(env, { typ: 'code', cc: q.code_challenge, ru: q.redirect_uri }, CODE_TTL);
+  const code = await sign(env, { typ: 'code', cc: q.code_challenge, ru: q.redirect_uri, auth: now() }, CODE_TTL);
   const to = new URL(q.redirect_uri);
   to.searchParams.set('code', code);
   if (q.state) to.searchParams.set('state', q.state);
@@ -116,20 +120,23 @@ async function token(request, env) {
   const p = new URLSearchParams(await request.text());
   const bad = (d) => json({ error: 'invalid_grant', error_description: d }, 400);
   const grant = p.get('grant_type');
+  let c;
   if (grant === 'authorization_code') {
-    const c = await verify(env, p.get('code'), 'code');
+    c = await verify(env, p.get('code'), 'code');
     if (!c) return bad('The code is not valid or has expired.');
     if (c.ru !== p.get('redirect_uri')) return bad('redirect_uri does not match.');
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(p.get('code_verifier') || '')));
     if (b64u(digest) !== c.cc) return bad('PKCE verification failed.');
   } else if (grant === 'refresh_token') {
-    if (!await verify(env, p.get('refresh_token'), 'refresh')) return bad('The refresh token is not valid or has expired.');
+    c = await verify(env, p.get('refresh_token'), 'refresh');
+    if (!c) return bad('The refresh token is not valid or has expired.');
   } else {
     return json({ error: 'unsupported_grant_type' }, 400);
   }
+  if (!(c.auth > now() - CONSENT_TTL)) return bad('Access has expired. Connect again from Claude.');
   return json({
-    access_token: await sign(env, { typ: 'access' }, ACCESS_TTL), token_type: 'Bearer', expires_in: ACCESS_TTL,
-    refresh_token: await sign(env, { typ: 'refresh' }, REFRESH_TTL)
+    access_token: await sign(env, { typ: 'access', auth: c.auth }, ACCESS_TTL), token_type: 'Bearer', expires_in: ACCESS_TTL,
+    refresh_token: await sign(env, { typ: 'refresh', auth: c.auth }, REFRESH_TTL)
   });
 }
 
