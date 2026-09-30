@@ -1637,7 +1637,9 @@ function d1(db) {
       assert.strictEqual((await rpc(list, ai)).body.result.tools.length, Object.keys(TOOLS).length);
       const init = await rpc({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-06-18' } }, ai);
       assert.strictEqual(init.body.result.protocolVersion, '2025-06-18');
-      const got = await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_accounts', arguments: {} } }, ai);
+      const future = await rpc({ jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2099-01-01' } }, ai);
+      assert.strictEqual(future.body.result.protocolVersion, '2025-11-25', 'an unknown version gets ours, not an echo');
+      const got =await rpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'get_accounts', arguments: {} } }, ai);
       assert.ok(JSON.parse(got.body.result.content[0].text).accounts.length > 0);
       // An undeclared arg never reaches the handler, and the page size is capped.
       const tx = await rpc({ jsonrpc: '2.0', id: 3, method: 'tools/call',
@@ -1645,6 +1647,30 @@ function d1(db) {
       const page = JSON.parse(tx.body.result.content[0].text);
       assert.strictEqual(page.limit, 200);
       assert.ok(page.total > 1, 'the undeclared id filter was applied');
+      // A filter the model got wrong is an error, never an empty page it reads as "no spend".
+      const tool = async (name, args) => (await rpc({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name, arguments: args } }, ai)).body.result;
+      const txs = async (args) => JSON.parse((await tool('list_transactions', args)).content[0].text);
+      for (const [name, args] of [['get_budgets', { month: 'Sep 2026' }], ['list_transactions', { from: '2026/08/01' }],
+        ['list_transactions', { category: 'Food' }], ['list_transactions', { account: 'Nobody' }]]) {
+        const r = await tool(name, args);
+        assert.ok(r.isError, name + ' ' + JSON.stringify(args) + ' must be an error');
+      }
+      assert.strictEqual((await txs({ category: 'expense: food' })).total, (await txs({ category: 'Expense: Food' })).total, 'names resolve case-insensitively');
+      const cats = JSON.parse((await tool('get_categories', {})).content[0].text).categories;
+      assert.strictEqual(cats.find((c) => c.name === 'Expense: Food').segment, 'Essentials');
+      // A range is inclusive at both ends, and source filters by where the row came from.
+      const day = await txs({ date: '2026-08-05' });
+      assert.ok(day.total > 0);
+      assert.strictEqual((await txs({ from: '2026-08-05', to: '2026-08-05' })).total, day.total);
+      const span = await txs({ from: '2026-08-05', to: '2026-08-13' });
+      assert.ok(span.total > day.total && span.transactions.every((x) => x.Date >= '2026-08-05' && x.Date <= '2026-08-13'));
+      let parts = 0;
+      for (const source of TOOLS.list_transactions.props.source.enum) {
+        const s = await txs({ source });
+        assert.ok(s.transactions.every((x) => source === 'legacy' || x.ID.startsWith(source + '-')), source);
+        parts += s.total;
+      }
+      assert.strictEqual(parts, (await txs({})).total, 'the sources partition the ledger');
       const write = await rpc({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'deleteTransaction', arguments: {} } }, ai);
       assert.strictEqual(write.body.error.code, -32602);
       const proto = await rpc({ jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'constructor' } }, ai);
@@ -1720,6 +1746,23 @@ function d1(db) {
       // Refresh gives a working pair.
       const t2 = await (await tok({ grant_type: 'refresh_token', refresh_token: t.refresh_token })).json();
       assert.strictEqual((await mcpWith(t2.access_token)).status, 200);
+
+      // A refresh chain ends 90 days after the passphrase, however often it renews: a
+      // stolen refresh token cannot keep itself alive until AI_READ_TOKEN rotates.
+      const realNow = Date.now;
+      try {
+        let rt = t2.refresh_token;
+        for (const days of [25, 50, 75]) {
+          Date.now = () => realNow() + days * 86400e3;
+          const r = await tok({ grant_type: 'refresh_token', refresh_token: rt });
+          assert.strictEqual(r.status, 200, 'renews on day ' + days);
+          rt = (await r.json()).refresh_token;
+        }
+        Date.now = () => realNow() + 95 * 86400e3;
+        const end = await tok({ grant_type: 'refresh_token', refresh_token: rt });
+        assert.strictEqual(end.status, 400);
+        assert.match((await end.json()).error_description, /Connect again/);
+      } finally { Date.now = realNow; }
 
       // Rotating AI_READ_TOKEN voids every token issued under the old one; unset, the routes are gone.
       wenv.AI_READ_TOKEN = 'rotated';
