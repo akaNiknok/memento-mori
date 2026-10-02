@@ -9,7 +9,7 @@ The repository is public. Do not put a secret value in a tracked file.
 | Item | Where | Notes |
 | --- | --- | --- |
 | App, API, bot and jobs | Cloudflare Workers, name `memento-mori` | There is no custom domain. The address ends with `workers.dev`. The name is the address of the app and of the webhook. A new name gives a new address and a new Worker without secrets. |
-| Staging app | Cloudflare Workers, name `memento-mori-staging` | The `develop` branch deploys here. It has no bot, no cron and no email job. The data is invented. |
+| Staging app | Cloudflare Workers, name `memento-mori-staging` | Each pull request that changes `worker/` deploys here. It has no bot, no cron and no email job. The data is invented. |
 | Staging database | Cloudflare D1, name `memento-mori-staging` | It holds `worker/seed.sql` only. Never put real data here. |
 | Database | Cloudflare D1, name `memento-mori` | Region `apac`. The id is in `worker/wrangler.toml`. |
 | Mail courier and backup | Google Apps Script | Open script.google.com, or use `npm run open`. The project id is in `.clasp.json`. There is no Web App deployment. |
@@ -20,7 +20,7 @@ The repository is public. Do not put a secret value in a tracked file.
 | Worker logs | Cloudflare dashboard, Workers, `memento-mori`, tab **Logs** | The setting `[observability]` in `worker/wrangler.toml` turns this on. It keeps the last days and it is searchable. `npm run tail` shows the present only. |
 | Apps Script logs | script.google.com, tab **Executions** | The tab **Cloud logs** needs the standard Google Cloud project. See the task below. |
 | Google Cloud project | console.cloud.google.com, owner account | A standard project, attached to Apps Script. The backup needs it, because `DriveApp` needs the Drive API. |
-| Source code | GitHub, `akaNiknok/memento-mori` | `main` is the released code. `develop` is the integration branch. |
+| Source code | GitHub, `akaNiknok/memento-mori` | `main` is the released code, and the only long-lived branch. |
 
 ## Settings that are not in the repository
 
@@ -205,7 +205,7 @@ npm run push             # send the Apps Script files
 
 ### The staging app
 
-The `develop` branch deploys to a second Worker. Each push to `develop` starts the Staging workflow, which applies the migrations, then deploys. Use the staging app to examine a change before you merge the release.
+A pull request into `main` deploys to a second Worker when it changes `worker/`. Each push to the pull request starts the Staging workflow, which applies the migrations, then deploys. Use the staging app to examine a change before you merge it. There is one staging app, so the last pull request that you pushed is the one that you see.
 
 Staging is separate in every way that matters. It has its own database. It has no cron, so it never calls IBKR. It has no bot token and no email job. It needs one secret only:
 
@@ -225,14 +225,13 @@ The seed is `worker/seed.sql`, which holds invented data. A normal push never re
 
 ### Release procedure
 
-1. Do the work on a `feature/*` branch. Merge the branch into `develop` with a pull request.
-2. Run `npm version patch` or `npm version minor` on `develop`. The command also writes the number into `worker/public/index.html`. Commit the result.
-3. Run `npm run release`. The command tests the code, then opens the pull request from `develop` to `main`. **It does not deploy.**
-4. Wait for the CI check. Then merge the pull request on GitHub.
+1. Make a branch from `main`: `git switch -c feature/<name> --no-track origin/main`. Do the work on it.
+2. Run `npm run release -- patch` or `npm run release -- minor`. The command changes the version, writes the number into `worker/public/index.html`, and commits. Then it tests the code, pushes the branch, and opens the pull request into `main`. **It does not deploy.**
+3. Wait for the CI check. Then merge the pull request on GitHub.
 
-The CI workflow tests each pull request and each push to `develop`. The `main` branch accepts only a pull request with a green check. Nobody approves the release a second time: your merge is the approval. You can also set auto-merge on the pull request. GitHub then merges it when the check becomes green, and the release starts without you.
+A change that does not deploy (documents, tests, Apps Script) needs no new version. Open its pull request with `gh pr create --base main`. The CI check stops a pull request that changes `worker/` without a new version. The CI workflow tests each pull request. The `main` branch accepts only a pull request with a green check. Nobody approves the release a second time: your merge is the approval. You can also set auto-merge on the pull request. GitHub then merges it when the check becomes green, and the release starts without you.
 
-The merge starts the Release workflow. The workflow applies the database migrations, deploys the Worker, makes the tag, and makes the GitHub release. A last job then moves `develop` forward to `main` again. GitHub deletes each merged branch, `develop` included, and that last job makes `develop` again at the same commit. A merge that does not change the version does nothing. The Apps Script files are not part of this procedure. Send them with `npm run push` when you change them.
+The merge starts the Release workflow. The workflow applies the database migrations, deploys the Worker, makes the tag, and makes the GitHub release. A merge that does not change the version does nothing. GitHub deletes each merged branch. The Apps Script files are not part of this procedure. Send them with `npm run push` when you change them.
 
 The workflow needs two GitHub repository secrets: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. Give the token the permissions **Workers Scripts:Edit** and **D1:Edit**, and no more. The token can read all of the financial data, because it can deploy a Worker that is bound to the database.
 
@@ -246,7 +245,7 @@ The code and the database do not go back together. Undo the code first.
 
 1. Read the list of versions: `npx wrangler versions list`.
 2. Put the last good version back: `npx wrangler rollback`.
-3. Tell the repository what you did. Open an issue, or make the fix on a `hotfix/*` branch.
+3. Tell the repository what you did. Open an issue, or make the fix on a `fix/*` branch.
 
 **A migration does not go back.** `npx wrangler d1 migrations apply` moves forward only. So an old Worker must still operate with the new schema. Never put a migration that removes or renames a column in the same release as the code that needs the change. Use two releases: the first adds, the second removes. If a migration destroys data, use D1 Time Travel below.
 

@@ -2,8 +2,9 @@ name: Release
 
 # The only path to live. A merge into main whose package.json version is not yet
 # tagged applies the D1 migrations, deploys the Worker, tags vX.Y.Z and writes the
-# GitHub Release. A push to main that does not change the version does nothing, so
-# the hotfix flow (merge first, bump second) reaches live on the bump commit.
+# GitHub Release. A push to main that does not change the version does nothing — a
+# docs or Apps Script PR merges without a deploy. ci.yml refuses a worker/ change
+# without a bump, so main never holds code that is not live.
 #
 # Order is load-bearing and matches the old release.js: migrations run BEFORE the
 # deploy, and the deploy before the tag. New code must never meet an old schema, and
@@ -49,8 +50,8 @@ jobs:
     if: needs.check.outputs.release == 'true'
     runs-on: ubuntu-latest
     # The GitHub environment is kept for the Deployments log, NOT as a gate: its
-    # protection rules were removed on purpose (2026-08-30). Approving the
-    # develop -> main PR is the approval; a second click here approved nothing new.
+    # protection rules were removed on purpose (2026-08-30). Merging the PR into
+    # main is the approval; a second click here approved nothing new.
     # Do not add required reviewers back unless you want that click again.
     environment: production
     env:
@@ -93,8 +94,8 @@ jobs:
           git tag "$TAG"
           git push origin "$TAG"
 
-      # Notes come from commit subjects, not --generate-notes: this repo commits
-      # straight to develop, so PR-derived notes come out empty.
+      # Notes come from commit subjects, not --generate-notes: they list each commit
+      # since the last tag, which is more than the PR titles say.
       - name: GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,56 +110,3 @@ jobs:
           fi
           printf '## What'"'"'s Changed\n%s\n\n%s\n' "$LOG" "$LINK" \
             | gh release create "$TAG" --title "$TAG" --notes-file -
-
-  # A merge into main leaves develop behind by the merge commit (or, in the hotfix
-  # flow, by the bump commit). It runs on every push to main, released or not, and is
-  # deliberately independent of the release job: develop must catch up even when the
-  # deploy fails.
-  #
-  # The fast-forward is tried first, because a develop -> main release PR makes
-  # develop an ancestor of main. THE HOTFIX FLOW DOES NOT: a hotfix branches off main
-  # and merges to main, so develop never sees it, and any commit already sitting on
-  # develop makes the two diverge. That is the common case, not an exception — it
-  # failed on v2.9.1 with one merged PR waiting on develop, and the old job could
-  # only stop and ask for the repair by hand.
-  #
-  # So a refused fast-forward now MERGES main into develop and pushes that, which is
-  # the same repair a person did by hand. Nothing is ever forced: no rebase, no
-  # force-push, no history rewrite. A real content conflict still stops the job,
-  # because only a person can decide which side wins.
-  #
-  # This push carries GITHUB_TOKEN, so it starts no CI run of its own (GitHub does
-  # not re-trigger workflows on a token push). Two green branches can still break
-  # each other when merged, so the merge commit's first real check is the CI on the
-  # next develop -> main release PR, which is the gate before main either way.
-  backmerge:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Bring develop up to main
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if git push origin "$GITHUB_SHA":refs/heads/develop; then
-            echo "::notice::develop fast-forwarded to main."
-            exit 0
-          fi
-          # develop has its own commits. Merge, and retry if it moves under us.
-          for i in 1 2 3; do
-            git fetch origin develop
-            git checkout -B backmerge origin/develop
-            if ! git merge --no-edit -m "Back-merge main into develop" "$GITHUB_SHA"; then
-              git merge --abort || true
-              echo "::error::main and develop changed the same lines. Merge main into develop by hand."
-              exit 1
-            fi
-            if git push origin HEAD:refs/heads/develop; then
-              echo "::notice::Merged main into develop."
-              exit 0
-            fi
-            echo "::warning::develop moved while the back-merge ran. Retry $i of 3."
-          done
-          echo "::error::develop kept moving under the back-merge. Merge main into develop by hand."
-          exit 1
