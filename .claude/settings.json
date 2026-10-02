@@ -19,7 +19,7 @@
           },
           {
             "type": "command",
-            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/handoff.js\""
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/status.js\""
           }
         ]
       }
