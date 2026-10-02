@@ -1,9 +1,8 @@
 name: CI
 
-# The gate that was missing. Before this, `npm test` ran only in the local push hook
-# (which no cloud session and no browser-merged PR passes through) and in the release
-# job, by which point the code is already on main and deploying. Now every pull request
-# and every push to develop is checked before it can reach that point.
+# The gate before main. Every pull request runs `npm test`; `test` is the required
+# check on main. A push to main needs no run of its own: the PR that made it was
+# tested, and release.yml tests again before it deploys.
 #
 # One job on purpose. `npm test` already applies every migration AND worker/seed.sql to
 # a real SQLite database (test-api.js), so a separate `wrangler d1 migrations apply
@@ -11,8 +10,6 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [develop]
 
 # A second push to the same branch makes the first run irrelevant. The release
 # workflow deliberately does NOT do this — a deploy must never be cancelled.
@@ -26,8 +23,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2   # HEAD is the PR merge commit; HEAD^1 is the base tip
       - uses: actions/setup-node@v7
         with:
           node-version: 22
       - run: npm ci
       - run: npm test
+
+      # main = live. release.yml deploys only a merge whose version is untagged, so a
+      # worker/ change without a bump would sit on main, undeployed, and ship unseen
+      # with the next bumped PR. Docs, tests and Apps Script need no bump.
+      - name: A worker/ change carries a version bump
+        if: github.base_ref == 'main'
+        run: |
+          git diff --quiet HEAD^1 HEAD -- worker/ && exit 0
+          OLD=$(git show HEAD^1:package.json | node -p "JSON.parse(require('fs').readFileSync(0)).version")
+          NEW=$(node -p "require('./package.json').version")
+          if [ "$OLD" = "$NEW" ]; then
+            echo "::error::This PR changes worker/ but the version is still $OLD. Run: npm run release -- patch|minor"
+            exit 1
+          fi

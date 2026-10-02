@@ -27,8 +27,8 @@ const cases = [
   ['grep -rn "' + B + '" CLAUDE.md', 0, 'a grep for the words is not a push'],
   [B + ' origin main', 2, 'a push to the released branch is blocked'],
   ['cd /repo && ' + B + ' -u origin main', 2, 'blocked behind a cd prefix'],
-  [B + ' origin develop', 0, 'a push to develop passes when tests pass'],
-  [B + ' --force-with-lease origin develop', 0, 'flags do not defeat the match'],
+  [B + ' -u origin feature/x', 0, 'a push to a feature branch passes when tests pass'],
+  [B + ' --force-with-lease origin feature/x', 0, 'flags do not defeat the match'],
 ];
 
 for (const [command, want, label] of cases) {

@@ -20,7 +20,7 @@ process.stdin.on('data', d => (raw += d)).on('end', () => {
 
   if (pushes.some(s => new RegExp(`\\b${RELEASED}\\b`).test(s))) {
     console.error(
-      `Blocked: never push directly to ${RELEASED}. Merge develop into ${RELEASED}, then run \`npm run release\`.`
+      `Blocked: never push directly to ${RELEASED}. Push a branch and open a PR into ${RELEASED} (\`npm run release -- patch|minor\` does both).`
     );
     process.exit(2);
   }

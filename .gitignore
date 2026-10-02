@@ -11,7 +11,6 @@ npm-debug.log*
 *.log
 
 # Session handoff notes (per-session artifact, not history)
-HANDOFF.md
 
 # Personal financial-system docs — real PII, lives in the private enchiridion repo
 docs/

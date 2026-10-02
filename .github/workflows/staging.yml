@@ -1,8 +1,8 @@
 name: Staging
 
-# develop's deploy target. Every push to develop redeploys
-# memento-mori-staging.<subdomain>.workers.dev, so a change can be checked
-# from a phone before the release PR is merged.
+# The PR preview. Every push to a pull request into main that touches worker/
+# redeploys memento-mori-staging.<subdomain>.workers.dev, so a change can be checked
+# from a phone before the PR is merged. One staging Worker: the last PR pushed wins.
 #
 # A SEPARATE file from ci.yml on purpose: the two need opposite concurrency policies.
 # CI cancels a superseded run; a deploy must never be cancelled between "migrations
@@ -14,8 +14,9 @@ name: Staging
 # No `npm ci`: nothing but wrangler runs, and npx fetches that.
 
 on:
-  push:
-    branches: [develop]
+  pull_request:
+    branches: [main]
+    paths: ['worker/**']
   workflow_dispatch:
     inputs:
       reseed:
