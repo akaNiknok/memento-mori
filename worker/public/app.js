@@ -3566,7 +3566,7 @@ function edPickRow(g,label,options,value,ph){
   Object.defineProperty(b,'value',{get:function(){ return cur; },set:set,configurable:true});
   set(value); g.appendChild(b); return b;
 }
-// The picker page: a search field (long lists only), then every option, the current one ticked.
+// The picker page: a search field pinned under the bar (long lists only), then every option, the current one ticked.
 function openPicker(title,items,cur,done){
   var page=edPage(title,barBtn(icon('chevron')+'Back','back',popPage));
   var q=el('input','ed-search'); q.type='search'; q.placeholder='Search'; q.autocomplete='off'; q.enterKeyHint='done';
@@ -3586,7 +3586,7 @@ function openPicker(title,items,cur,done){
   }
   q.oninput=draw;
   q.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); var f=draw(); if(f[0]) pick(f[0].value); } };
-  if(items.length>8) page.body.appendChild(q);
+  if(items.length>8) page.insertBefore(q,page.body);   // outside the scroller, so it stays on top
   page.body.appendChild(list); draw();
   if(edOpen()) pushPage(page); else openEditor(page);   // the add field's chips open one alone
   var on=list.querySelector('.on'), sc=page.body;

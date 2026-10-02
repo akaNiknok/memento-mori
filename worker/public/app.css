@@ -888,7 +888,7 @@ table.tbl td.editing{padding:0}
 .ed-del{justify-content:center;color:var(--neg)}
 .ed-opt .ico{margin-left:auto;color:var(--accent);width:20px;height:20px}
 .ed-empty{color:var(--dim);justify-content:center}
-.ed-search{width:100%;background:var(--card-2);border:0;border-radius:10px;padding:9px 12px;font:inherit;font-size:17px;color:var(--text);margin-bottom:16px;outline:0}
+.ed-search{flex:none;width:calc(100% - 32px);background:var(--card-2);border:0;border-radius:10px;padding:9px 12px;font:inherit;font-size:17px;color:var(--text);margin:16px 16px 0;outline:0}
 @media(min-width:768px){
   .ed-root{display:grid;place-items:center;padding:max(24px,env(safe-area-inset-top)) 24px calc(24px + var(--kb,0px));
     transition:padding .25s cubic-bezier(.2,.8,.2,1)}
