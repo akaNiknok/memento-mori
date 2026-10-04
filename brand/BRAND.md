@@ -7,7 +7,7 @@
 - **Small-size cut** (`mm-symbol-small.svg`): radius 116 and a 30-unit waist. Use it at 32 px and smaller, so the waist stays open at 16 px. The app icon and favicon use this cut.
 - **Reversed cut** (`mm-symbol-reversed.svg`): radius 107 and a 16-unit waist. White on a dark ground looks heavier, so this cut is thinner.
 - **Wordmark:** custom geometric lowercase, built from rectangles, half-rings and rings. There is no font, so you need no licence. Stem 17, x-height 100. Round letters overshoot by 1.5 and are 1 unit heavier.
-- **Source:** `build.py` writes every master SVG. To change the geometry, edit it and run `python brand/build.py brand`. Then copy the small-cut path into `MARK` in `icons.js` and run `npm run icons`.
+- **Source:** `build.py` writes every master SVG. To change the geometry, edit it and run `python brand/build.py brand`. Then copy the small-cut path into `MARK` in `icons.js` and run `npm run icons`. Also copy the small-cut and wordmark paths into the nav brand in `worker/public/index.html`.
 
 ## Files
 | Use | File |
@@ -19,6 +19,7 @@
 | One colour: black, white, accent; SVG and PNG at 1200 px | `variants/` |
 | Avatar, rounded app icon, favicon | `icons/` |
 | The PWA icons | `icons.js` → `worker/public/icon-*.png` |
+| The app's nav brand (tile and wordmark) | inline copies in `worker/public/index.html` |
 
 ## Colour
 The logo uses the app's own tokens. It adds no new colour.
