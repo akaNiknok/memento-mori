@@ -1,4 +1,7 @@
-# Memento Mori
+<h1><picture>
+  <source media="(prefers-color-scheme: dark)" srcset="brand/mm-horizontal-dark.svg">
+  <img src="brand/mm-horizontal-accent.svg" alt="Memento Mori" width="360">
+</picture></h1>
 
 *Count the money. Remember the days.*
 

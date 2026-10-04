@@ -12,33 +12,20 @@ const path = require('path');
 
 const OUT_DIR = path.join(__dirname, 'worker', 'public');
 const SIZES = [180, 512];
-// Accent-blue gradient tile (#4A86FF -> #1D4ED8 at CSS 160deg, DESIGN.md "App icon"),
-// a faint rising line behind a white peso sign, in a 96-unit box. The line is decoration
-// only, so the glyph still reads at 16px favicon size and sits well inside Android's 80%
-// maskable safe circle (ink diagonal 53.9 vs the 76.8 safe diameter).
-const GLYPH = 58;
-// text-anchor="middle" already centres the ink horizontally at x=48 — don't "correct" it.
-// Vertically it does NOT: dominant-baseline="central" is the midpoint of the font's
-// ascent/descent, which for a caps-only glyph sits ~6.55% of the font size too low. Hence
-// the lift below, measured by pixel-scanning the rendered ink box and verified to hold at
-// font sizes 48/58/66/72 (residual <0.1 unit), so changing GLYPH alone stays centred.
-// Two variants, same geometry: light = white ink on the accent gradient; dark (iOS 18 style)
-// = the accent gradient as the ink on a near-black tile (#1C1C1E -> #000, the dark --card/--bg).
+// The hourglass coin (brand/, DESIGN.md "App icon"): a coin with its sides cut away, so
+// what is left is an hourglass. Flat tile, one ink, in a 96-unit box. The drawing is the
+// small-size cut (brand/mm-symbol-small.svg, wider waist) because icon-180 is also the
+// favicon: its 30-unit waist stays ~1px at 16px. Scaled to a 58-unit diameter, inside
+// Android's 80% maskable safe circle (76.8). The shape is symmetric, so no optical nudge.
+// Two variants, same geometry: light = white on the accent (--accent #2463EB); dark =
+// the dark --accent (#0A84FF) on the dark --card (#1C1C1E).
 // index.html swaps the favicon and apple-touch-icon to the -dark files in the dark theme.
-const icon = (bg0, bg1, ink0, ink1) => `<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
-  <defs><linearGradient id="g" x1=".33" y1="0" x2=".67" y2="1">
-    <stop offset="0" stop-color="${bg0}"/><stop offset="1" stop-color="${bg1}"/>
-  </linearGradient><linearGradient id="i" x1=".33" y1="0" x2=".67" y2="1">
-    <stop offset="0" stop-color="${ink0}"/><stop offset="1" stop-color="${ink1}"/>
-  </linearGradient></defs>
-  <rect width="96" height="96" fill="url(#g)"/>
-  <path d="M10 74 L30 60 L44 66 L86 30" fill="none" stroke="url(#i)" stroke-opacity=".18"
-    stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="48" y="${48 - 0.0655 * GLYPH}" font-size="${GLYPH}" font-weight="700" fill="url(#i)"
-    text-anchor="middle" dominant-baseline="central"
-    font-family="Segoe UI, Helvetica Neue, Arial, sans-serif">&#8369;</text>
+const MARK = 'M24 76.62A116 116 0 0 1 232 76.62L143 128L232 179.38A116 116 0 0 1 24 179.38L113 128Z';
+const icon = (bg, ink) => `<svg viewBox="0 0 96 96" xmlns="http://www.w3.org/2000/svg">
+  <rect width="96" height="96" fill="${bg}"/>
+  <path transform="translate(48 48) scale(.25) translate(-128 -128)" fill="${ink}" d="${MARK}"/>
 </svg>`;
-const ICONS = { '': icon('#4A86FF', '#1D4ED8', '#fff', '#fff'), '-dark': icon('#1C1C1E', '#000', '#6FA0FF', '#2463EB') };
+const ICONS = { '': icon('#2463EB', '#fff'), '-dark': icon('#1C1C1E', '#0A84FF') };
 const BROWSERS = [
   'C:/Program Files/Google/Chrome/Application/chrome.exe',
   'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
