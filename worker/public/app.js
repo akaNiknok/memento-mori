@@ -2221,7 +2221,7 @@ function acctRow(a){
   if(a.isLiability&&a.creditLimit>0){
     var u=(a.balancePhp||0)/a.creditLimit, full=a.availableCredit!=null&&a.availableCredit<=0;
     meter=bar6([[u,'var(--'+(full?'warn':'accent')+')']]).outerHTML;
-    sub=full?'Limit reached':money(a.availableCredit,true)+' available of '+money(a.creditLimit,true);
+    sub=full?'Limit reached':money(a.availableCredit)+' available of '+money(a.creditLimit);
     if(full) subCls=' warn';
   }
   var foreign=a.currency&&a.currency!=='PHP';
