@@ -34,12 +34,16 @@
  *   APP_PASS, SECRET_TOKEN, TELEGRAM_BOT_TOKEN, TELEGRAM_USER_ID, GEMINI_API_KEY,
  *   INGEST_TOKEN, IBKR_FLEX_TOKEN, IBKR_FLEX_QUERY_ID, AI_READ_TOKEN (optional; unset closes /mcp)
  * Bindings: DB (D1), FX_CACHE (KV, optional — unbound just means every FX lookup fetches).
+ *
+ * RPC: the named export `Glance` is a WorkerEntrypoint with no route — only another
+ * Worker holding a service binding to it (`entrypoint = "Glance"`) can call it.
  */
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
   getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getRecurring, getCategories,
   getLedger, listTransactions, getDebts, listTable, getExportAll, getWidget, getParse, setWidgetAccounts, setSmartLists,
   createTransaction, createTransfer, updateTransaction, deleteTransaction, updateAccount,
-  bulkUpdateTransactions, bulkDeleteTransactions, updateTableCell, insertTableRow, deleteTableRow
+  bulkUpdateTransactions, bulkDeleteTransactions, updateTableCell, insertTableRow, deleteTableRow, glance
 } from './src/api.js';
 import { handleUpdate, ingestEmail } from './src/telegram.js';
 import { runScheduled } from './src/jobs.js';
@@ -102,6 +106,15 @@ export default {
     await runScheduled(env, event && event.cron);
   }
 };
+
+/**
+ * Service-binding RPC, read-only. No fetch handler and no path, so the public internet
+ * cannot reach it: a binding is the credential, and only Workers on this account can
+ * declare one. Returns { left, runway, runwayTarget, holdings: [{ticker, subtype, quantity}] }.
+ */
+export class Glance extends WorkerEntrypoint {
+  summary() { return glance(this.env); }
+}
 
 async function telegram(request, env) {
   if (env.SECRET_TOKEN &&

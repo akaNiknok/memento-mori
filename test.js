@@ -19,6 +19,11 @@
 const fs = require('fs'), path = require('path'), vm = require('vm'), assert = require('assert');
 const { test, describe } = require('node:test');
 const { pathToFileURL } = require('url');
+// worker.js imports cloudflare:workers (the Glance RPC entrypoint), which only workerd
+// provides. Node gets a stand-in that keeps ctx/env the way the real base class does.
+require('node:module').registerHooks({ resolve: (s, c, next) => s !== 'cloudflare:workers' ? next(s, c)
+  : { shortCircuit: true, url: 'data:text/javascript,' + encodeURIComponent(
+      'export class WorkerEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }') } });
 
 const near = (a, b, tol = 1e-9) => Math.abs(a - b) <= tol;
 

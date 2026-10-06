@@ -1098,6 +1098,21 @@ export async function getWidget(args, env) {
   };
 }
 
+/**
+ * The Glance RPC (worker.js `Glance.summary`): left to spend this month, the emergency
+ * runway against its target, and what is held. Built from the two handlers that already
+ * answer each part, so every figure matches the screen that shows it.
+ */
+export async function glance(env) {
+  const [inv, bud] = await Promise.all([getInvestments({}, env), getBudgets({}, env)]);
+  return {
+    left: bud.essentialsRewards ? bud.essentialsRewards.remainingPhp : null,
+    runway: inv.runway.months, runwayTarget: inv.runway.targetMonths,
+    // The account name IS the ticker (accounts.symbol holds the same string).
+    holdings: inv.positions.map((p) => ({ ticker: p.name, subtype: p.subtype, quantity: p.quantity }))
+  };
+}
+
 /** POST {names:[...]} — the balance widget's accounts, set from the Admin screen. */
 export async function setWidgetAccounts(args, env) {
   const names = Array.isArray(args.names) ? args.names.filter((n) => n) : [];
