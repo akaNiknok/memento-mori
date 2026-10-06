@@ -31,6 +31,11 @@ catch (e) {
 // After the skip guard on purpose: the skip must still work on a Node too old for either
 // built-in module.
 const { test, describe } = require('node:test');
+// worker.js imports cloudflare:workers (the Glance RPC entrypoint), which only workerd
+// provides. Node gets a stand-in that keeps ctx/env the way the real base class does.
+require('node:module').registerHooks({ resolve: (s, c, next) => s !== 'cloudflare:workers' ? next(s, c)
+  : { shortCircuit: true, url: 'data:text/javascript,' + encodeURIComponent(
+      'export class WorkerEntrypoint { constructor(ctx, env) { this.ctx = ctx; this.env = env; } }') } });
 
 // ── the D1 shim ──────────────────────────────────────────────────────────────
 function d1(db) {
@@ -457,6 +462,18 @@ function d1(db) {
       assert.ok(w.recent.every((t) => 'Segment' in t));                     // the widget's icon tint
       assert.deepStrictEqual((await api.getBootstrap({}, env)).widgetAccounts, ['Wise']);
       await api.setWidgetAccounts({ names: [] }, env);
+    });
+
+    test('Glance.summary (service-binding RPC): left, runway and holdings match their screens', async () => {
+      const { Glance } = await load('worker.js');
+      const g = await new Glance({}, env).summary();
+      const inv = await api.getInvestments({}, env), bud = await api.getBudgets({}, env);
+      assert.deepStrictEqual(Object.keys(g), ['left', 'runway', 'runwayTarget', 'holdings']);
+      assert.strictEqual(g.left, bud.essentialsRewards.remainingPhp);
+      assert.strictEqual(g.runway, inv.runway.months);
+      assert.strictEqual(g.runwayTarget, 4);
+      assert.deepStrictEqual(g.holdings, inv.positions.map((p) => ({ ticker: p.name, subtype: p.subtype, quantity: p.quantity })));
+      assert.ok(g.holdings.length > 0);
     });
 
     test('getDashboard: the chart window is client-chosen and clamped', async () => {
