@@ -2066,5 +2066,15 @@ function d1(db) {
       assert.deepStrictEqual(rows.map((x) => x.amount_u).sort((x, y) => x - y), [80e6, 120e6],
         'each item exactly once');
     });
+
+    test('the receipt carries the new balance of each account it moved', async () => {
+      const real = globalThis.fetch; const sent = [];
+      globalThis.fetch = async (u, o) => { sent.push(JSON.parse(o.body).text || ''); return new Response('{"ok":true}', { status: 200 }); };
+      try {
+        await tgMod.logItems(tgEnv, CHAT, 'tg-778', [{ Date: '2026-03-16', Category: 'Expense: Food', Account: 'Maya', Amount: 7 }]);
+      } finally { globalThis.fetch = real; }
+      const maya = (await api.getAccounts({}, env)).accounts.find((a) => a.name === 'Maya');
+      assert.ok(sent[0].includes('New balance') && sent[0].includes(tgMod.balanceLine(maya)), sent[0]);
+    });
   });
 })().catch((err) => { console.error(err); process.exit(1); });

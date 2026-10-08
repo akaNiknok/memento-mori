@@ -304,7 +304,7 @@ export const TURN_CEILING_MS = 25000;
  * a handful of transactions, not hundreds.
  */
 export async function logItems(env, chat, idPrefix, items, replyTo, mailId) {
-  const out = [], ids = [], idx = [];
+  const out = [], ids = [], idx = [], touched = new Set();
   // One read for the whole message, not one per item: resolveAccountName needs the live
   // account list to turn what the model wrote into the name the ledger knows.
   const { accounts, categories } = await refs(env);
@@ -336,9 +336,18 @@ export async function logItems(env, chat, idPrefix, items, replyTo, mailId) {
       // The receipt reads `args`, not `p`: it must show the resolved account names.
       out.push(receipt(args, res.status) + (res.warning ? '\n› ⚠ ' + res.warning : ''));
       ids.push(args.ID); idx.push(rank[i]);
+      touched.add(args.Account); if (args.ToAccount) touched.add(args.ToAccount);
     } catch (err) {
       out.push('❌ *Failed to add transaction*\n› ' + msgOf(err));
     }
+  }
+  // The balance of every account the message moved, read AFTER the writes (#163).
+  // A failed read only drops this block: the receipt still says what was written.
+  if (touched.size) {
+    try {
+      const hits = (await getAccounts({}, env)).accounts.filter((a) => touched.has(a.name));
+      if (hits.length) out.push('◈ *New balance' + (hits.length > 1 ? 's' : '') + '*\n' + hits.map(balanceLine).join('\n'));
+    } catch (err) { /* the receipt matters more than the balance */ }
   }
   // Only the rows that actually landed, so undo cannot chase a failed item.
   if (ids.length) await metaSet(env, 'tg_last_ids', JSON.stringify(ids));
@@ -508,17 +517,20 @@ async function balance(env, chat, query, replyTo) {
 export function balanceText(accounts, name) {
   const hits = matchAccounts(accounts || [], name);
   if (!hits.length) return '⌕ No account matching *' + name + '*.';
-  const lines = hits.map((a) => {
-    const ccy = String(a.currency || 'PHP').toUpperCase();
-    const native = (ccy !== 'PHP' && a.balanceNative !== null && a.balanceNative !== undefined)
-      ? '`' + money(a.balanceNative, ccy) + '` · ' : '';
-    return '› _' + a.name + '_ ' + native + '`' + php(a.balancePhp) + '`' + (a.isLiability ? ' owed' : '');
-  });
+  const lines = hits.map(balanceLine);
   if (hits.length > 1) {
     const total = hits.reduce((s, a) => s + (Number(a.netWorthPhp) || 0), 0);
     lines.push('*Total* `' + (total < 0 ? '-' : '') + php(total) + '`');
   }
   return '◈ *Balance' + (hits.length > 1 ? 's' : '') + '*\n' + lines.join('\n');
+}
+
+/** One account's line: the /balance reply and the new balance under a receipt. */
+export function balanceLine(a) {
+  const ccy = String(a.currency || 'PHP').toUpperCase();
+  const native = (ccy !== 'PHP' && a.balanceNative !== null && a.balanceNative !== undefined)
+    ? '`' + money(a.balanceNative, ccy) + '` · ' : '';
+  return '› _' + a.name + '_ ' + native + '`' + php(a.balancePhp) + '`' + (a.isLiability ? ' owed' : '');
 }
 
 /**
