@@ -168,14 +168,14 @@ export function prompt(refs, unixDate) {
   const cats = refs.categories
     .map((c) => '- "' + c.name + '" (' + (c.type || '') + ') - ' + (c.description || '')).join('\n');
   const accts = refs.accounts
-    .map((a) => '- "' + a.name + '" (' + (a.currency || '') + ')').join('\n');
+    .map((a) => '- "' + a.name + '" (' + (a.currency || '') + ', ' + (a.subtype || '') + ')').join('\n');
 
   return [
     "You are a personal finance assistant. Classify the user's message and extract structured data.",
     '',
     'VALID CATEGORIES ("Name" (Type) - Description):', cats,
     '',
-    'VALID ACCOUNTS ("Name" (Currency)):', accts,
+    'VALID ACCOUNTS ("Name" (Currency, Subtype); a Receivable is a person):', accts,
     '',
     'INTENT:',
     'A. "log" — the message records money moving. Put ONE entry in items per transaction;',
@@ -197,6 +197,10 @@ export function prompt(refs, unixDate) {
     '    message used',
     '4. Amount must be a positive number',
     '5. For a transfer between accounts: use a Transfer-type category and set BOTH ToAccount and ToAmount',
+    '   Money sent TO an account in VALID ACCOUNTS (a person included; match part of the name,',
+    '   "Ben" is "Tito Ben") is ALWAYS a transfer, even when the message says what it is for:',
+    '   "500 from GCash to Tito Ben \\"Fuel for Lola\\"" is a Transfer-type category with',
+    '   Description "Fuel for Lola", never an Expense category',
     '6. ExchangeRate is PHP per 1 USD — only set it if explicitly mentioned, otherwise null',
     '7. If it is not a transfer, ToAccount and ToAmount must be null',
     '8. query.month is yyyy-MM; "this month" is ' + today.slice(0, 7) + ', and no period mentioned means null (all time)',

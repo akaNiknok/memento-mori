@@ -307,9 +307,9 @@ export async function logItems(env, chat, idPrefix, items, replyTo, mailId) {
   const out = [], ids = [], idx = [];
   // One read for the whole message, not one per item: resolveAccountName needs the live
   // account list to turn what the model wrote into the name the ledger knows.
-  const accounts = (await refs(env)).accounts;
+  const { accounts, categories } = await refs(env);
   const all = items.map((p) => ({
-    Date: p.Date, Category: p.Category, Description: p.Description,
+    Date: p.Date, Category: xferCategory(categories, p), Description: p.Description,
     Account: resolveAccountName(accounts, p.Account),
     Amount: p.Amount, ExchangeRate: p.ExchangeRate,
     ToAccount: p.ToAccount ? resolveAccountName(accounts, p.ToAccount) : p.ToAccount,
@@ -561,6 +561,19 @@ export function resolveAccountName(accounts, name) {
     || (q.length >= 3 ? only(accounts.filter((a) => squash(a.name) === q)) : null)
     || (low.length >= 3 ? only(accounts.filter((a) => String(a.name).toLowerCase().indexOf(low) !== -1)) : null)
     || name;
+}
+
+/**
+ * A parsed item with a ToAccount but a non-Transfer category ("1000 to Kuya Audi
+ * 'Fuel for Daddy'" filed as Transport: Fuel or Family: Support) would fail
+ * assertShape. The destination is the reliable half — the model copied it from the
+ * account list — so the category yields to "Transfer: Internal", the same fallback the
+ * SPA's transfer form makes. The purpose stays in the Description.
+ */
+export function xferCategory(categories, p) {
+  if (!p.ToAccount) return p.Category;
+  const type = (name) => { const c = categories.find((x) => x.name === name); return c && c.type; };
+  return type(p.Category) !== 'Transfer' && type('Transfer: Internal') ? 'Transfer: Internal' : p.Category;
 }
 
 /** Absolute amount with its currency's symbol; unknown currencies (SHARES) trail the code. */
