@@ -525,12 +525,19 @@ export function balanceText(accounts, name) {
   return '◈ *Balance' + (hits.length > 1 ? 's' : '') + '*\n' + lines.join('\n');
 }
 
-/** One account's line: the /balance reply and the new balance under a receipt. */
+/**
+ * One account's line: the /balance reply and the new balance under a receipt.
+ * money() drops the sign, so put it back (#166). A liability's balance is what is owed
+ * (positive = owed, see db.js netWorthPhp), so it reads "owed"; any other balance below
+ * zero (an overdrawn account, a card in credit) reads "-".
+ */
 export function balanceLine(a) {
   const ccy = String(a.currency || 'PHP').toUpperCase();
+  const owed = a.isLiability && (Number(a.balancePhp) || 0) > 0;
+  const sign = (n) => (Number(n) < 0 ? '-' : '');
   const native = (ccy !== 'PHP' && a.balanceNative !== null && a.balanceNative !== undefined)
-    ? '`' + money(a.balanceNative, ccy) + '` · ' : '';
-  return '› _' + a.name + '_ ' + native + '`' + php(a.balancePhp) + '`' + (a.isLiability ? ' owed' : '');
+    ? '`' + sign(a.balanceNative) + money(a.balanceNative, ccy) + '` · ' : '';
+  return '› _' + a.name + '_ ' + native + '`' + sign(a.balancePhp) + php(a.balancePhp) + '`' + (owed ? ' owed' : '');
 }
 
 /**

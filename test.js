@@ -312,6 +312,9 @@ describe('Gmail courier watermark (vm)', () => {
       const text = tg.balanceText(accts, null);
       assert.ok(text.includes('owed'), 'a liability must be marked owed');
       assert.ok(text.includes('₱130'), 'total is signed net worth (100+50-20), got: ' + text);
+      // #166: money() drops the sign, so an overdrawn account read as a positive balance.
+      assert.strictEqual(tg.balanceLine({ name: 'CIMB', currency: 'PHP', balancePhp: -5024.53 }), '› _CIMB_ `-₱5,024.53`');
+      assert.strictEqual(tg.balanceLine({ name: 'Card', currency: 'PHP', balancePhp: -5, isLiability: true }), '› _Card_ `-₱5`');
     });
 
     test('resolveAccountName turns what the model wrote into the ledger name', () => {
