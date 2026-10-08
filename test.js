@@ -333,6 +333,17 @@ describe('Gmail courier watermark (vm)', () => {
       [undefined, null, ''].forEach((v) => assert.strictEqual(r(v), v));
     });
 
+    test('xferCategory: a transfer filed under an Expense category becomes Transfer: Internal', () => {
+      const cats = [{ name: 'Transport: Fuel', type: 'Expense' }, { name: 'Financial: Loan', type: 'Transfer' },
+                    { name: 'Transfer: Internal', type: 'Transfer' }];
+      const x = (Category, ToAccount) => tg.xferCategory(cats, { Category, ToAccount });
+      assert.strictEqual(x('Transport: Fuel', 'Kuya Audi'), 'Transfer: Internal');   // the 2026-10-08 failure
+      assert.strictEqual(x('Financial: Loan', 'Kuya Audi'), 'Financial: Loan');      // a Transfer category stays
+      assert.strictEqual(x('Transport: Fuel', null), 'Transport: Fuel');             // not a transfer at all
+      assert.strictEqual(tg.xferCategory([], { Category: 'Transport: Fuel', ToAccount: 'X' }), 'Transport: Fuel',
+                         'no Transfer: Internal in the ledger: pass through and let assertShape refuse');
+    });
+
     test('querySummary sums absolute PHP and caps the list', () => {
       const rows = Array.from({ length: 7 }, (_, i) =>
         ({ Date: '2026-08-0' + (i + 1), Category: 'Food', 'Amount (PHP)': -10 }));
