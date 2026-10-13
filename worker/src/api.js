@@ -354,7 +354,7 @@ export async function getCategories(args, env) {
   })) };
 }
 
-export async function getRecurring(args, env) {
+async function getRecurring(args, env) {
   const rows = (await env.DB.prepare('SELECT * FROM recurring ORDER BY id').all()).results;
   return { status: 'success', rows: rows.map((r) => ({
     Description: r.description || '',
@@ -547,7 +547,7 @@ function combine(budgets, names) {
  * The whole Budgets screen in one response. `recurring` rides along because the screen
  * always draws both and getRecurring is a handful of rows: two GETs meant two ETags to
  * revalidate and two round trips on a cell connection to learn nothing changed.
- * getRecurring stays a route of its own — getBootstrap and the admin grid still use it.
+ * getBootstrap reads it too; it is no longer a route of its own (nothing called it).
  */
 export async function getBudgets(args, env) {
   const r = await refs(env);
@@ -636,8 +636,10 @@ export async function getDashboard(args, env, pre) {
   // retirement, and the chart window (2-24, client-chosen) must not resize its inputs.
   const now = parseMonthKey(manilaMonth());
   const closedKeys = [1, 2, 3].map((i) => { const p = shiftMonth(now.y, now.m, -i); return monthKey(p.y, p.m); });
+  // The last day of the last closed month: day 0 of the live month.
+  const closeDay = new Date(Date.UTC(now.y, now.m, 0)).toISOString().slice(0, 10);
 
-  const [[spend, flow, recent, snaps, closed, lastSnap], fireReturn] = await Promise.all([
+  const [[spend, flow, recent, snaps, closed, lastSnap], fireReturn, netAtClose] = await Promise.all([
     env.DB.batch([
       env.DB.prepare(
         // Single quotes only: SQLite reads "" as an identifier, not an empty string.
@@ -661,7 +663,8 @@ export async function getDashboard(args, env, pre) {
       // noise straight into the countdown.
       env.DB.prepare('SELECT net_worth_u FROM nw_snapshots WHERE month = ?').bind(closedKeys[0])
     ]),
-    metaGet(env, 'fire_real_return', '5')
+    metaGet(env, 'fire_real_return', '5'),
+    deltas(env, r, closeDay)
   ]);
 
   const spendBySegment = {}, spendByCategory = {};
@@ -694,7 +697,10 @@ export async function getDashboard(args, env, pre) {
   // come off. Averages are over the three closed months, signed (a refund nets down).
   let inc = 0, exp = 0;
   closed.results.forEach((x) => { if (x.type === 'Income') inc = fromU(x.s) || 0; else exp = fromU(x.s) || 0; });
-  const lentOut = accounts.reduce((s, a) => s + (isReceivable(a) ? Math.max(0, a.balancePhp || 0) : 0), 0);
+  // Money lent out AT THE CLOSE, like every other input. Today's balances moved the date
+  // mid-month: lend ₱20k on the 12th and the countdown jumped.
+  const lentOut = shapeAccounts(r, netAtClose, {}, fx)
+    .reduce((s, a) => s + (isReceivable(a) ? Math.max(0, a.balancePhp || 0) : 0), 0);
   const nwAtClose = lastSnap.results[0] ? fromU(lastSnap.results[0].net_worth_u) : null;
   const fire = nwAtClose == null ? null : fireEta({
     netWorthPhp: nwAtClose - lentOut,
@@ -1218,11 +1224,6 @@ export async function getLedger(args, env) {
  * changes===0 check reports {status:'duplicate'} instead of a second row. The SPA's
  * offline queue and Telegram's retry dedup BOTH depend on that exact contract —
  * test.js fails if either half goes missing.
- *
- * ponytail: the version bump rides in the batch even when the insert was a duplicate.
- * A no-op replay therefore invalidates client caches once; that is one extra refetch
- * against saving a round trip on every real write. Split the batch only if replays
- * ever stop being rare.
  */
 export async function createTransaction(args, env) {
   const r = await refs(env);
@@ -1240,12 +1241,10 @@ export async function createTransaction(args, env) {
   const id = args.ID || crypto.randomUUID();
   const fx = await resolveRate(env, acct.currency, args.ExchangeRate);
   const row = { date: parseDate(args.Date), category_id: cat.id, account_id: acct.id, amount_u: toU(args.Amount) };
-  const [res] = await env.DB.batch([
-    env.DB.prepare('INSERT INTO transactions (id, date, period, category_id, description, account_id, amount_u, fx_rate) ' +
+  const res = await env.DB.prepare('INSERT INTO transactions (id, date, period, category_id, description, account_id, amount_u, fx_rate) ' +
       'VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING')
       .bind(id, row.date, parsePeriod(args.Period) || null, cat.id,
-            args.Description || '', acct.id, row.amount_u, fx.blank ? null : fx.rate)
-  ]);
+            args.Description || '', acct.id, row.amount_u, fx.blank ? null : fx.rate).run();
   const transaction = await txById(env, r, id);
   if (!res.meta.changes) return { status: 'duplicate', message: 'ID already exists.', transaction };
   const out = { status: 'success', message: 'Transaction created.', transaction };
@@ -1310,19 +1309,30 @@ export async function createTransfer(args, env) {
   const id = args.ID || crypto.randomUUID();
   const fx = await impliedRate(env, acct, to, args.Amount, toAmount, args.ExchangeRate);
   const row = { date: parseDate(args.Date), category_id: cat.id, account_id: acct.id, amount_u: toU(args.Amount) };
-  const [res] = await env.DB.batch([
-    env.DB.prepare('INSERT INTO transactions (id, date, period, category_id, description, account_id, amount_u, fx_rate, to_account_id, to_amount_u) ' +
+  const res = await env.DB.prepare('INSERT INTO transactions (id, date, period, category_id, description, account_id, amount_u, fx_rate, to_account_id, to_amount_u) ' +
       'VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING')
       .bind(id, row.date, parsePeriod(args.Period) || null, cat.id,
             args.Description || '', acct.id, row.amount_u, fx.blank ? null : fx.rate,
-            to.id, toU(toAmount))
-  ]);
+            to.id, toU(toAmount)).run();
   const transaction = await txById(env, r, id);
   if (!res.meta.changes) return { status: 'duplicate', message: 'ID already exists.', transaction };
   const out = { status: 'success', message: 'Transfer created.', transaction };
   const dup = await duplicateWarning(env, id, row);
   if (fx.warning || dup) out.warning = [fx.warning, dup].filter(Boolean).join(' ');
   return out;
+}
+
+/**
+ * A move to an account in ANOTHER currency keeps the number and changes what it means:
+ * ₱500 moved onto a dollar account became $500, about ₱28,500, with no warning. The edit
+ * forms always send Amount, so they restate it; an inline or bulk move sends Account
+ * alone, and is refused rather than guessed at.
+ */
+function assertSameCurrency(acct, fromCurrency, amount, id) {
+  if (!acct || amount !== undefined) return;
+  const was = String(fromCurrency || BASE_CURRENCY).toUpperCase();
+  if (curOf(acct) !== was) throw new Error('Moving ' + id + ' from ' + was + ' to ' + curOf(acct) +
+    ' would read its amount in ' + curOf(acct) + '. Open it and enter the amount in ' + curOf(acct) + '.');
 }
 
 export async function updateTransaction(args, env) {
@@ -1357,6 +1367,7 @@ export async function updateTransaction(args, env) {
   if (mirrored !== undefined) patch.ToAmount = mirrored;
 
   const acct = r.acctByName[patch.Account !== undefined ? patch.Account : cur.Account];
+  assertSameCurrency(acct, cur.Currency, patch.Amount, cur.ID);
   const dst = hasTo(effTo) ? r.acctByName[effTo] : null;
   // createTransfer refuses this; an edit must not be the way round it.
   if (dst && acct && dst.id === acct.id) throw new Error('Account and ToAccount must differ.');
@@ -1387,9 +1398,7 @@ export async function updateTransaction(args, env) {
     put('fx_rate', fx.blank ? null : fx.rate);
   }
 
-  await env.DB.batch([
-    env.DB.prepare('UPDATE transactions SET ' + set.join(', ') + ' WHERE id = ?').bind(...bind, args.ID)
-  ]);
+  await env.DB.prepare('UPDATE transactions SET ' + set.join(', ') + ' WHERE id = ?').bind(...bind, args.ID).run();
   return { status: 'success', message: 'Transaction updated.', transaction: await txById(env, r, args.ID) };
 }
 
@@ -1398,9 +1407,7 @@ export async function deleteTransaction(args, env) {
   const r = await refs(env);
   const snapshot = await txById(env, r, args.ID);
   if (!snapshot) throw new Error('No transaction with ID: ' + args.ID);
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM transactions WHERE id = ?').bind(args.ID)
-  ]);
+  await env.DB.prepare('DELETE FROM transactions WHERE id = ?').bind(args.ID).run();
   return { status: 'success', message: 'Transaction deleted.', transaction: snapshot };
 }
 
@@ -1429,7 +1436,8 @@ export async function bulkUpdateTransactions(args, env) {
   if (p.ToAmount !== undefined && p.ToAmount !== '') assertNonZero('ToAmount', p.ToAmount);
 
   const found = (await env.DB.prepare(
-    'SELECT t.id, t.account_id, t.to_account_id, c.type AS type FROM transactions t JOIN categories c ON c.id = t.category_id ' +
+    'SELECT t.id, t.account_id, t.to_account_id, c.type AS type, a.currency AS currency FROM transactions t ' +
+    'JOIN categories c ON c.id = t.category_id JOIN accounts a ON a.id = t.account_id ' +
     'WHERE t.id IN (' + list(ids.length) + ')').bind(...ids).all()).results;
   const have = new Set(found.map((x) => x.id));
   const skipped = ids.filter((id) => !have.has(id));
@@ -1443,6 +1451,7 @@ export async function bulkUpdateTransactions(args, env) {
       assertShape(type, hasTo(to));
     });
   }
+  if (p.Account !== undefined) found.forEach((row) => assertSameCurrency(r.acctByName[p.Account], row.currency, p.Amount, row.id));
   // No row may end up a transfer to itself (createTransfer refuses one).
   const newFrom = p.Account !== undefined ? r.acctByName[p.Account].id : null;
   const newTo = hasTo(p.ToAccount) ? r.acctByName[p.ToAccount].id : null;
@@ -1480,10 +1489,8 @@ export async function bulkUpdateTransactions(args, env) {
 
   const targets = [...have];
   if (targets.length) {
-    await env.DB.batch([
-      env.DB.prepare('UPDATE transactions SET ' + set.join(', ') + ' WHERE id IN (' + list(targets.length) + ')')
-        .bind(...bind, ...targets)
-    ]);
+    await env.DB.prepare('UPDATE transactions SET ' + set.join(', ') + ' WHERE id IN (' + list(targets.length) + ')')
+        .bind(...bind, ...targets).run();
   }
   return { status: 'success', message: 'Bulk update complete.', updated: targets.length, skipped };
 }
@@ -1495,9 +1502,7 @@ export async function bulkDeleteTransactions(args, env) {
     .bind(...ids).all()).results.map((x) => x.id);
   const have = new Set(found);
   if (found.length) {
-    await env.DB.batch([
-      env.DB.prepare('DELETE FROM transactions WHERE id IN (' + list(found.length) + ')').bind(...found)
-    ]);
+    await env.DB.prepare('DELETE FROM transactions WHERE id IN (' + list(found.length) + ')').bind(...found).run();
   }
   return { status: 'success', message: 'Bulk delete complete.', deleted: found.length,
            skipped: ids.filter((id) => !have.has(id)) };
@@ -1533,9 +1538,7 @@ export async function updateAccount(args, env) {
   // otherwise report "Unknown Account" for an account that is right there.
   const target = resolveAccount(await refs(env), args.Name);
   if (!target) throw new Error('Unknown Account: ' + args.Name);
-  const [res] = await env.DB.batch([
-    env.DB.prepare('UPDATE accounts SET ' + set.join(', ') + ' WHERE id = ?').bind(...bind, target.id)
-  ]);
+  const res = await env.DB.prepare('UPDATE accounts SET ' + set.join(', ') + ' WHERE id = ?').bind(...bind, target.id).run();
   if (!res.meta.changes) throw new Error('Unknown Account: ' + args.Name);
   return { status: 'success', message: 'Account updated.', name: target.name, fieldsWritten: set.length };
 }
@@ -1681,10 +1684,8 @@ export async function updateTableCell(args, env) {
     throw new Error(col + ' is not editable on ' + name + '. Editable: ' + (t.edit.join(', ') || '(none)'));
   if (args.pk === undefined || args.pk === null || args.pk === '') throw new Error('updateTableCell requires pk.');
   await assertNotFrozen(env, name, col, args.pk);
-  const [res] = await env.DB.batch([
-    env.DB.prepare('UPDATE ' + name + ' SET ' + col + ' = ? WHERE ' + t.pk + ' = ?')
-      .bind(coerceCell(t, col, args.value), args.pk)
-  ]);
+  const res = await env.DB.prepare('UPDATE ' + name + ' SET ' + col + ' = ? WHERE ' + t.pk + ' = ?')
+      .bind(coerceCell(t, col, args.value), args.pk).run();
   if (!res.meta.changes) throw new Error('No ' + name + ' row with ' + t.pk + ' = ' + args.pk);
   return { status: 'success', table: name, pk: args.pk, column: col };
 }
@@ -1701,9 +1702,7 @@ export async function insertTableRow(args, env) {
     cols.push(c); vals.push(coerceCell(t, c, row[c]));
   });
   if (!cols.length) throw new Error('Nothing to insert. Settable: ' + allowed.join(', '));
-  const [res] = await env.DB.batch([
-    env.DB.prepare('INSERT INTO ' + name + ' (' + cols.join(',') + ') VALUES (' + list(cols.length) + ')').bind(...vals)
-  ]);
+  const res = await env.DB.prepare('INSERT INTO ' + name + ' (' + cols.join(',') + ') VALUES (' + list(cols.length) + ')').bind(...vals).run();
   return { status: 'success', table: name, pk: res.meta.last_row_id };
 }
 
@@ -1712,9 +1711,7 @@ export async function deleteTableRow(args, env) {
   const t = tableSpec(name);
   if (t.nodelete) throw new Error(name + ' is read-only in the admin grid.');
   if (args.pk === undefined || args.pk === null || args.pk === '') throw new Error('deleteTableRow requires pk.');
-  const [res] = await env.DB.batch([
-    env.DB.prepare('DELETE FROM ' + name + ' WHERE ' + t.pk + ' = ?').bind(args.pk)
-  ]);
+  const res = await env.DB.prepare('DELETE FROM ' + name + ' WHERE ' + t.pk + ' = ?').bind(args.pk).run();
   if (!res.meta.changes) throw new Error('No ' + name + ' row with ' + t.pk + ' = ' + args.pk);
   return { status: 'success', table: name, pk: args.pk, deleted: res.meta.changes };
 }
@@ -1732,6 +1729,6 @@ export async function getExportAll(args, env) {
   const res = await env.DB.batch(names.map((n) => env.DB.prepare('SELECT * FROM ' + n)));
   const tables = {};
   names.forEach((n, i) => { tables[n] = res[i].results; });
-  return { status: 'success',
-           exportedAt: new Date().toISOString(), tables };
+  // No timestamp: a clock makes the ETag unique every call. Backup.gs stamps pulledAt.
+  return { status: 'success', tables };
 }

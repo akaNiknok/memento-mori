@@ -25,6 +25,7 @@
     "bootstrap": "node bootstrap.js"
   },
   "devDependencies": {
-    "@google/clasp": "^2.4.2"
+    "@google/clasp": "^2.4.2",
+    "wrangler": "4.143.0"
   }
 }

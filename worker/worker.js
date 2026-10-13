@@ -40,7 +40,7 @@
  */
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import {
-  getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getRecurring, getCategories,
+  getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getCategories,
   getLedger, listTransactions, getDebts, listTable, getExportAll, getWidget, getParse, setWidgetAccounts, setSmartLists,
   createTransaction, createTransfer, updateTransaction, deleteTransaction, updateAccount,
   bulkUpdateTransactions, bulkDeleteTransactions, updateTableCell, insertTableRow, deleteTableRow, glance
@@ -58,7 +58,7 @@ const COOKIE = 'mm_auth';
  * test.js fails the build if a route is ever named against the rule.
  */
 export const ROUTES_READ = {
-  getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getRecurring, getCategories,
+  getBootstrap, getDashboard, getAccounts, getBudgets, getInvestments, getCategories,
   getLedger, listTransactions,
   getDebts,         // open debts per receivable account
   listTable,        // admin grid
@@ -117,7 +117,9 @@ export class Glance extends WorkerEntrypoint {
 }
 
 async function telegram(request, env) {
-  if (env.SECRET_TOKEN &&
+  // Fails CLOSED: an unset SECRET_TOKEN refuses every POST. It used to skip the check,
+  // which made /tg an open write endpoint on any deployment missing the secret.
+  if (!env.SECRET_TOKEN ||
       request.headers.get('X-Telegram-Bot-Api-Secret-Token') !== env.SECRET_TOKEN) {
     return new Response('forbidden', { status: 403 });
   }

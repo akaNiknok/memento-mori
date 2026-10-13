@@ -105,9 +105,4 @@ migrations_dir = "migrations"
 # An empty list is how one environment cancels an inherited schedule.
 [env.staging.triggers]
 crons = []
-
-# NOT a secret — a deliberately wrong value. worker.js checks the Telegram header only
-# when SECRET_TOKEN is SET, so leaving it unset on a public hostname would make /tg an
-# open write endpoint. Staging has no bot, so every real Telegram POST must be refused.
-[env.staging.vars]
-SECRET_TOKEN = "staging-has-no-bot"
+# No SECRET_TOKEN on staging: worker.js refuses every /tg POST when it is unset.
