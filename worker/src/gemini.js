@@ -94,7 +94,11 @@ export async function parse(env, refs, text, unixDate, budget = {}) {
   const payload = JSON.stringify({
     systemInstruction: { parts: [{ text: prompt(refs, unixDate) }] },
     contents: [{ role: 'user', parts: [{ text }] }],
-    generationConfig: { responseMimeType: 'application/json', responseSchema: SCHEMA }
+    // The -latest aliases moved to Flash models that think at MEDIUM by default, which
+    // ran the chat turn past its 9s cap (2026-10). Extraction needs no deliberation.
+    // LOW, not MINIMAL: 3.7/3.8 Flash reject MINIMAL with a 400.
+    generationConfig: { responseMimeType: 'application/json', responseSchema: SCHEMA,
+                        thinkingConfig: { thinkingLevel: 'LOW' } }
   });
   return JSON.parse(await tryModels(MODELS, (model, ms) => generate(model, key, payload, ms),
                                     budget.budgetMs, undefined, budget.capMs));
