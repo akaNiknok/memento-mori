@@ -411,10 +411,10 @@ describe('Gmail courier watermark (vm)', () => {
 
     test('the email courier parses on its own clock, under UrlFetchApp', () => {
       // The email path is NOT a chat turn: Apps Script holds the connection and no human
-      // waits, so Telegram's 9s cap only manufactured failures on a 3000-char body
+      // waits, so Telegram's per-attempt cap only manufactured failures on a 3000-char body
       // (2026-09-04). Its ceiling is UrlFetchApp's ~60s instead.
       assert.ok(gemini.EMAIL_TIMEOUT_MS > gemini.MODEL_TIMEOUT_MS,
-        'the email path gains nothing over the chat turn — the 9s cap is back');
+        'the email path gains nothing over the chat turn — the chat cap is back');
       assert.ok(gemini.EMAIL_TIMEOUT_MS <= gemini.EMAIL_BUDGET_MS,
         'one attempt may not outlast the whole chain');
       assert.ok(gemini.EMAIL_BUDGET_MS <= 55000,
@@ -499,6 +499,9 @@ describe('Gmail courier watermark (vm)', () => {
       assert.ok(drain, 'drainUpdates() moved — re-point this guard');
       assert.ok(/await route\(/.test(drain[1]) && !/handleUpdate\(/.test(drain[1]),
         'the drain goes through handleUpdate, which will see its own claim and rescue nothing');
+      // A rescue holds no Telegram connection; with the chat cap it just fails the same way again.
+      assert.ok(/route\([^)]*EMAIL_BUDGET_MS/.test(drain[1]),
+        'the drain parses on the chat turn\'s clock — a busy Gemini fails every rescue too');
     });
 
     test('read routes are named get…/list…, write routes are not', () => {

@@ -240,7 +240,8 @@ export async function drainUpdates(env, now = Date.now()) {
         .catch((err) => console.error('telegram: slow notice failed: ' + msgOf(err)));
     }
     try {
-      await route(runEnv, update);
+      // No Telegram connection waits on a cron, so a rescue gets the email path's patience.
+      await route(runEnv, update, { capMs: EMAIL_TIMEOUT_MS, budgetMs: EMAIL_BUDGET_MS });
       await settle(env, row.update_id);
       rescued++;
     } catch (err) {
@@ -264,7 +265,7 @@ export async function drainUpdates(env, now = Date.now()) {
 export const isOwner = (env, from) =>
   !!env.TELEGRAM_USER_ID && !!from && from.id != null && String(from.id) === String(env.TELEGRAM_USER_ID);
 
-async function route(env, update) {
+async function route(env, update, budget) {
   if (update && update.callback_query) return callback(env, update.callback_query);
   const msg = update && update.message;
   if (!msg || !msg.text) return;                       // ignore photos/stickers/edits
@@ -285,7 +286,7 @@ async function route(env, update) {
   const r = await refs(env);
   let parsed;
   try {
-    parsed = await parse(env, r, text, msg.date);
+    parsed = await parse(env, r, text, msg.date, budget);
   } catch (err) {
     // Gemini overloaded or slow (2026-10): throw, so the row stays pending and the
     // drain tries again in a few minutes. handleUpdate tells the owner it will.
@@ -702,7 +703,7 @@ export async function ingestEmail(args, env) {
   const messageId = String(args.messageId || '');
   if (!messageId) throw new Error('ingestEmail requires messageId.');
   const r = await refs(env);
-  // The chat turn's 9s/20s clock is Telegram's, not this path's — see EMAIL_BUDGET_MS.
+  // The chat turn's 12s/20s clock is Telegram's, not this path's — see EMAIL_BUDGET_MS.
   const parsed = await parse(env, r, emailText(args, args.hints), Math.floor(Date.parse(args.date) / 1000) || undefined,
                              { capMs: EMAIL_TIMEOUT_MS, budgetMs: EMAIL_BUDGET_MS });
   const items = parsed.error ? [] : (parsed.items || []);

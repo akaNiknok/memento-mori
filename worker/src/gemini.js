@@ -33,7 +33,7 @@ export const MODELS = ['gemini-flash-latest', 'gemini-flash-lite-latest'];
  * cap stops one model hanging forever, the budget stops the FALLBACK from adding three
  * caps together.
  */
-export const MODEL_TIMEOUT_MS = 9000;    // one attempt
+export const MODEL_TIMEOUT_MS = 12000;   // one attempt (9s until 2026-10: flash timed out under load)
 export const PARSE_BUDGET_MS = 20000;    // the whole fallback chain
 
 /**
@@ -42,6 +42,7 @@ export const PARSE_BUDGET_MS = 20000;    // the whole fallback chain
  * message every 5 minutes for 3 hours. The 9s cap turned an ordinary slow answer on a
  * 3000-char email body into a logged failure (2026-09-04), so the email path gets a
  * patient pair instead. The ceiling here is UrlFetchApp's own ~60s, not TURN_CEILING_MS.
+ * The bot's rescue drain (telegram.js) uses the same pair: a cron holds no connection.
  */
 export const EMAIL_TIMEOUT_MS = 20000;   // one attempt
 export const EMAIL_BUDGET_MS = 45000;    // the whole fallback chain
@@ -95,7 +96,7 @@ export async function parse(env, refs, text, unixDate, budget = {}) {
     systemInstruction: { parts: [{ text: prompt(refs, unixDate) }] },
     contents: [{ role: 'user', parts: [{ text }] }],
     // The -latest aliases moved to Flash models that think at MEDIUM by default, which
-    // ran the chat turn past its 9s cap (2026-10). Extraction needs no deliberation.
+    // ran the chat turn past its per-attempt cap (2026-10). Extraction needs no deliberation.
     // LOW, not MINIMAL: 3.7/3.8 Flash reject MINIMAL with a 400.
     generationConfig: { responseMimeType: 'application/json', responseSchema: SCHEMA,
                         thinkingConfig: { thinkingLevel: 'LOW' } }
