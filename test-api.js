@@ -1139,11 +1139,37 @@ function d1(db) {
       finally { globalThis.fetch = real; }
 
       assert.strictEqual(sent.length, 1, 'a timed-out model produced silence, which is the bug');
-      assert.match(sent[0].text, /did not answer within \d+s/,
-        'the reply must name the timeout in words, not leak a DOMException');
+      assert.match(sent[0].text, /Gemini is busy/);
       assert.strictEqual(attempts, gem.MODELS.length, 'an instant failure should still walk the whole chain');
       assert.strictEqual(sqlite.prepare("SELECT COUNT(*) n FROM transactions WHERE id LIKE 'tg-9004-%'").get().n, 0,
         'a timed-out parse must write nothing');
+      // 2026-10: Gemini's 503/slow spells last minutes. The message stays queued for
+      // the drain instead of ending in ❌ "send it again".
+      const row = sqlite.prepare('SELECT done, attempts FROM seen_updates WHERE update_id = 9004').get();
+      assert.strictEqual(row.done, 0, 'a busy Gemini closed the row — the message is lost');
+      assert.strictEqual(row.attempts, 1, 'the busy turn was not counted, so the drain repeats the notice');
+    });
+
+    test('a message Gemini was too busy for lands on the next drain, with no second notice', async () => {
+      const real = globalThis.fetch;
+      const sent = [];
+      globalThis.fetch = async (u, init) => {
+        if (String(u).includes('generativelanguage')) {
+          return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: JSON.stringify({
+            intent: 'log', error: null, query: null,
+            items: [{ Date: '2026-08-20', Category: 'Expense: Food', Description: 'Mobile data 60GB',
+                      Account: 'Maya', Amount: 749 }] }) }] } }] }), { status: 200 });
+        }
+        sent.push(JSON.parse(init.body));
+        return new Response('{"ok":true}', { status: 200 });
+      };
+      const tgEnv = Object.assign({}, env, { TELEGRAM_USER_ID: String(CHAT), TELEGRAM_BOT_TOKEN: 'x',
+                                             GEMINI_API_KEY: 'x', APP_URL: 'https://example.dev' });
+      try { assert.strictEqual(await tg.drainUpdates(tgEnv, Date.now() + tg.STALE_MS + 1), 1); }
+      finally { globalThis.fetch = real; }
+      assert.strictEqual(sent.length, 1, 'the rescue sent a "Still working" on top of the busy notice');
+      assert.match(sent[0].text, /Logged/);
+      assert.strictEqual(sqlite.prepare("SELECT COUNT(*) n FROM transactions WHERE id LIKE 'tg-9004-%'").get().n, 1);
     });
 
     test('a failure that could not be reported releases the claim for the retry', async () => {
