@@ -52,6 +52,7 @@ export async function handleUpdate(env, update) {
     await settle(env, updateId);
   } catch (err) {
     console.error('telegram: ' + (err && err.stack ? err.stack : err));
+    if (err && err.busy && await deferred(env, update)) return;
     // Say what broke, and close the row: the owner has been told, so a redelivery must
     // not repeat the complaint and the drain must not replay the work. If even that
     // cannot be delivered, drop the claim instead, so Telegram's own redelivery gets a
@@ -80,6 +81,26 @@ async function report(env, update, err) {
     console.error('telegram: report failed: ' + msgOf(e));
     return false;
   }
+}
+
+/**
+ * A parse Gemini could not answer is retried, not lost: say so once and leave the row
+ * pending for the drain. Returns false when the notice could not go out, so the caller
+ * falls back to report()/unsee(). attempts = 1 counts this turn, and keeps the drain's
+ * own "Still working" notice from repeating the news.
+ */
+async function deferred(env, update) {
+  const msg = update.message;
+  try {
+    if (await send(env, msg.chat.id, '⏳ *Gemini is busy*\n› _Nothing is logged yet. ' +
+                   'I will try again in a few minutes._', msg.message_id) === false) return false;
+  } catch (err) {
+    console.error('telegram: busy notice failed: ' + msgOf(err));
+    return false;
+  }
+  try { await env.DB.prepare('UPDATE seen_updates SET attempts = 1 WHERE update_id = ?').bind(update.update_id).run(); }
+  catch (err) { console.error('telegram: could not count the busy turn: ' + msgOf(err)); }
+  return true;
 }
 
 /**
@@ -266,7 +287,9 @@ async function route(env, update) {
   try {
     parsed = await parse(env, r, text, msg.date);
   } catch (err) {
-    return send(env, chat, '❌ *Failed to add transaction*\n› ' + msgOf(err), replyTo);
+    // Gemini overloaded or slow (2026-10): throw, so the row stays pending and the
+    // drain tries again in a few minutes. handleUpdate tells the owner it will.
+    throw Object.assign(err, { busy: true });
   }
   if (parsed.error) return send(env, chat, '❌ *Failed to add transaction*\n› ' + parsed.error, replyTo);
 
