@@ -11,7 +11,8 @@ name: Staging
 # It does NOT run the tests. ci.yml runs them on the same push, and a migration that
 # fails here is exactly the failure this environment exists to find before production.
 #
-# No `npm ci`: nothing but wrangler runs, and npx fetches that.
+# `npm ci` installs the wrangler pinned in package-lock.json. `npx wrangler@4` fetched
+# whatever 4.x was newest, with the Cloudflare token in its environment.
 
 on:
   pull_request:
@@ -39,17 +40,23 @@ jobs:
         working-directory: worker
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install the pinned wrangler
+        working-directory: .
+        run: npm ci
 
       # Same order as production: new code must never meet an old schema.
       - name: Apply D1 migrations
-        run: npx wrangler@4 d1 migrations apply memento-mori-staging --env staging --remote
+        run: npx wrangler d1 migrations apply memento-mori-staging --env staging --remote
 
       # Only on request. Seeding on every push would wipe whatever you were part way
       # through testing; run this workflow by hand once after creating the database,
       # and again whenever staging needs a clean slate.
       - name: Load worker/seed.sql
         if: ${{ github.event_name == 'workflow_dispatch' && inputs.reseed }}
-        run: npx wrangler@4 d1 execute memento-mori-staging --env staging --remote --file=./seed.sql
+        run: npx wrangler d1 execute memento-mori-staging --env staging --remote --file=./seed.sql
 
       - name: Deploy the staging Worker
-        run: npx wrangler@4 deploy --env staging
+        run: npx wrangler deploy --env staging

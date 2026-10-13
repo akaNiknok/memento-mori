@@ -6,7 +6,7 @@ name: CI
 #
 # One job on purpose. `npm test` already applies every migration AND worker/seed.sql to
 # a real SQLite database (test-api.js), so a separate `wrangler d1 migrations apply
-# --local` step would download wrangler to re-prove what the tests just proved.
+# --local` step would re-prove what the tests just proved.
 
 on:
   pull_request:

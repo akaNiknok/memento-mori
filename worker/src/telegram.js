@@ -170,38 +170,35 @@ export const DRAIN_LIMIT = 5;
  * It calls route() and NOT handleUpdate(), because handleUpdate claims first and the
  * row is already claimed — the rescue would see its own claim and return.
  *
- * `at` is re-stamped BEFORE the work, so an overlapping drain leaves the row alone for
- * another STALE_MS and two rescues cannot run the same turn side by side. That write
- * also spends the attempt: a rescue that dies the same way its turn did must not retry
- * forever, and MAX_ATTEMPTS is what turns a poisonous update into one error message.
+ * Each row is CLAIMED ATOMICALLY, ONE AT A TIME, when its turn starts: one UPDATE …
+ * RETURNING re-stamps `at` and spends the attempt. Selecting five rows up front and
+ * claiming each as the loop reached it let an overlapping drain take the rows not yet
+ * reached, and two rescues then ran one turn side by side (a duplicate receipt). The
+ * stamp walks with real time from the drain's start, so a row claimed late is fresh.
+ * Spending the attempt here is what turns a poisonous update into one error message
+ * after MAX_ATTEMPTS instead of a retry every two minutes.
  */
 export async function drainUpdates(env, now = Date.now()) {
-  let rows;
-  try {
-    rows = (await env.DB.prepare(
-      'SELECT update_id, payload, attempts FROM seen_updates ' +
-      'WHERE done = 0 AND payload IS NOT NULL AND at <= ? ORDER BY update_id LIMIT ?'
-    ).bind(now - STALE_MS, DRAIN_LIMIT).all()).results || [];
-  } catch (err) {
-    console.error('telegram: the drain could not read the queue: ' + msgOf(err));
-    return 0;
-  }
-  if (!rows.length) return 0;
-  // A cron has no request, so no origin. seen() stored the last one it saw; without it
-  // the receipt still lands, only without its ✎ Edit button.
-  const runEnv = env.APP_URL ? env
-    : Object.assign({}, env, { APP_URL: await metaGet(env, 'app_url').catch(() => '') });
-  let rescued = 0;
-  for (const row of rows) {
-    const attempt = (row.attempts || 0) + 1;
+  const started = Date.now();
+  let runEnv = null, rescued = 0;
+  for (let n = 0; n < DRAIN_LIMIT; n++) {
+    let row;
     try {
-      await env.DB.prepare('UPDATE seen_updates SET attempts = ?, at = ? WHERE update_id = ?')
-        .bind(attempt, now, row.update_id).run();
+      row = await env.DB.prepare(
+        'UPDATE seen_updates SET attempts = attempts + 1, at = ? WHERE update_id = (' +
+        'SELECT update_id FROM seen_updates WHERE done = 0 AND payload IS NOT NULL AND at <= ? ' +
+        'ORDER BY update_id LIMIT 1) RETURNING update_id, payload, attempts'
+      ).bind(now + (Date.now() - started), now - STALE_MS).first();
     } catch (err) {
-      // The claim cannot be re-stamped, so a second drain would run this row beside us.
-      console.error('telegram: could not claim update ' + row.update_id + ' for rescue: ' + msgOf(err));
-      continue;
+      console.error('telegram: the drain could not read the queue: ' + msgOf(err));
+      return rescued;
     }
+    if (!row) break;
+    // A cron has no request, so no origin. seen() stored the last one it saw; without it
+    // the receipt still lands, only without its ✎ Edit button.
+    if (!runEnv) runEnv = env.APP_URL ? env
+      : Object.assign({}, env, { APP_URL: await metaGet(env, 'app_url').catch(() => '') });
+    const attempt = row.attempts;
     let update = null;
     try { update = JSON.parse(row.payload); } catch (err) { /* not recoverable, closed below */ }
     if (!update) {
@@ -238,13 +235,21 @@ export async function drainUpdates(env, now = Date.now()) {
   return rescued;
 }
 
+/**
+ * Is this sender the owner? Fails CLOSED. The old test compared String(from.id) to
+ * String(TELEGRAM_USER_ID), so an unset id and an update with no `from` were both the
+ * text "undefined" — and matched.
+ */
+export const isOwner = (env, from) =>
+  !!env.TELEGRAM_USER_ID && !!from && from.id != null && String(from.id) === String(env.TELEGRAM_USER_ID);
+
 async function route(env, update) {
   if (update && update.callback_query) return callback(env, update.callback_query);
   const msg = update && update.message;
   if (!msg || !msg.text) return;                       // ignore photos/stickers/edits
   const chat = msg.chat.id, replyTo = msg.message_id;
 
-  if (String(msg.from && msg.from.id) !== String(env.TELEGRAM_USER_ID)) {
+  if (!isOwner(env, msg.from)) {
     return send(env, chat, '⛔ *Unauthorized. This bot is private.*');
   }
 
@@ -401,7 +406,7 @@ export function logKeyboard(env, idPrefix, indices, ids, mailId) {
 async function callback(env, cq) {
   const msg = cq.message || {};
   const chat = msg.chat && msg.chat.id;
-  if (String(cq.from && cq.from.id) !== String(env.TELEGRAM_USER_ID)) return answer(env, cq, 'Unauthorized.');
+  if (!isOwner(env, cq.from)) return answer(env, cq, 'Unauthorized.');
 
   const mail = /^e:([0-9a-zA-Z]{1,64})$/.exec(String(cq.data || ''));
   if (mail) {

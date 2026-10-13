@@ -442,7 +442,18 @@ function d1(db) {
         // The countdown is about NOW. Browsing back a month, or asking for a wider chart,
         // must not re-date the owner's retirement — both would if it read `month`/`months`.
         assert.deepStrictEqual((await api.getDashboard({ month: '2026-Mar', months: 24 }, env)).fire, f);
+
+        // Lending money TODAY must not move it either: lentOut is read at the close too.
+        sqlite.exec("INSERT INTO account_types (subtype, type) VALUES ('FI Receivable','Asset');" +
+          "INSERT INTO accounts (id,name,currency,subtype,starting_balance_u) VALUES (99,'FiLent','PHP','FI Receivable',0);");
+        await api.createTransfer({ ID: 'fi-lend', Date: dbm.manilaToday(), Category: 'Investment: Growth',
+                                   Account: 'Maya', ToAccount: 'FiLent', Amount: 20000 }, env);
+        ids.push('fi-lend');
+        assert.deepStrictEqual((await api.getDashboard({}, env)).fire, f, 'a loan made this month re-dated the countdown');
       } finally {
+        for (const ID of ids) await api.deleteTransaction({ ID }, env).catch(() => {});
+        ids.length = 0;
+        sqlite.exec("DELETE FROM accounts WHERE id = 99; DELETE FROM account_types WHERE subtype = 'FI Receivable';");
         sqlite.exec("DELETE FROM nw_snapshots WHERE taken_at = 'x'");
         for (const ID of ids) await api.deleteTransaction({ ID }, env);
       }
@@ -692,7 +703,6 @@ function d1(db) {
       const e = await api.getExportAll({}, env);
       ['accounts', 'categories', 'transactions', 'ledger', 'meta', 'prices'].forEach((t) =>
         assert.ok(Array.isArray(e.tables[t]), 'missing table ' + t));
-      assert.ok(e.exportedAt);
     });
   });
 
@@ -1287,6 +1297,38 @@ function d1(db) {
       } finally { globalThis.fetch = real; }
     });
 
+    test('two overlapping drains never rescue the same update', async () => {
+      // A drain used to SELECT its five rows up front and claim each one only when the
+      // loop reached it. A second drain two minutes later took the rows not yet claimed,
+      // and the first then ran them again: one turn, two receipts.
+      const real = globalThis.fetch;
+      const replies = [];
+      let release;
+      const gate = new Promise((r) => { release = r; });
+      globalThis.fetch = async (u, init) => {
+        replies.push(JSON.parse(init.body).reply_to_message_id);
+        if (replies.length === 1) await gate;   // the first drain hangs on its first reply
+        return new Response('{"ok":true}', { status: 200 });
+      };
+      const tgEnv = Object.assign({}, env, { TELEGRAM_USER_ID: String(CHAT), TELEGRAM_BOT_TOKEN: 'x',
+                                             APP_URL: 'https://example.dev' });
+      const bal = (id) => ({ update_id: id, message: { message_id: id, date: 1788000000,
+        chat: { id: CHAT }, from: { id: CHAT }, text: '/balance' } });
+      try {
+        // attempts = 1, so no "Still working" notice muddies the count of replies.
+        for (const id of [9201, 9202]) {
+          sqlite.prepare('INSERT INTO seen_updates (update_id, at, payload, done, attempts) VALUES (?, ?, ?, 0, 1)')
+            .run(id, Date.now() - tgMod.STALE_MS - 1000, JSON.stringify(bal(id)));
+        }
+        const first = tgMod.drainUpdates(tgEnv, Date.now());
+        await new Promise((r) => setTimeout(r, 20));
+        assert.strictEqual(await tgMod.drainUpdates(tgEnv, Date.now()), 1, 'the second drain took the free row');
+        release();
+        assert.strictEqual(await first, 1, 'the first drain re-ran a row the second one already took');
+        assert.deepStrictEqual(replies.slice().sort(), [9201, 9202], 'one reply per update');
+      } finally { globalThis.fetch = real; }
+    });
+
     test('the drain reports a broken queue instead of throwing into the cron', async () => {
       // runScheduled has no catch of its own for the drain: the daily job reports to
       // Telegram, and a rescue that cannot even read D1 has no chat to report into.
@@ -1626,11 +1668,27 @@ function d1(db) {
 
   await describe('HTTP layer', () => {
     test('/api is closed without a credential and open with either one', async () => {
-      assert.strictEqual((await call('/api?action=getRecurring')).status, 401);
+      assert.strictEqual((await call('/api?action=getAccounts')).status, 401);
       const cookie = { Cookie: 'mm_auth=' + await hex('pw') };
-      assert.strictEqual((await call('/api?action=getRecurring', { headers: cookie })).body.status, 'success');
+      assert.strictEqual((await call('/api?action=getAccounts', { headers: cookie })).body.status, 'success');
       const bearer = { Authorization: 'Bearer tok' };
       assert.strictEqual((await call('/api?action=getExportAll', { headers: bearer })).body.status, 'success');
+    });
+
+    test('/tg fails closed: no secret, or no owner id, opens nothing', async () => {
+      // Staging once had no TELEGRAM_USER_ID and a header value printed in the public
+      // repo. String(undefined) === String(undefined), so an update with no `from`
+      // passed as the owner and could press Undo on any row.
+      const tg = (e, headers) => worker.fetch(new Request('https://x/tg', { method: 'POST', headers,
+        body: JSON.stringify({ update_id: 777001, message: { message_id: 1, chat: { id: 5 }, text: '/undo' } }) }), e, ctx);
+      assert.strictEqual((await tg(wenv, { 'X-Telegram-Bot-Api-Secret-Token': 'anything' })).status, 403,
+        'an unset SECRET_TOKEN must refuse, not skip the check');
+      const { isOwner } = tgMod;
+      assert.ok(!isOwner({}, undefined), 'no owner id and no sender matched');
+      assert.ok(!isOwner({}, { id: 'undefined' }));
+      assert.ok(!isOwner({ TELEGRAM_USER_ID: '1' }, undefined));
+      assert.ok(!isOwner({ TELEGRAM_USER_ID: '1' }, { id: 2 }));
+      assert.ok(isOwner({ TELEGRAM_USER_ID: '1' }, { id: 1 }));
     });
 
     test('/mcp is read-only by construction and has its own credential', async () => {
@@ -1795,13 +1853,13 @@ function d1(db) {
       // The passphrase guards the deployed app. Locally it only blocked the agents and
       // the fresh checkouts that have no worker/.dev.vars, and Cloudflare cannot route
       // a production request to Host: localhost.
-      const local = await worker.fetch(new Request('http://localhost:8123/api?action=getRecurring'), wenv, ctx);
+      const local = await worker.fetch(new Request('http://localhost:8123/api?action=getAccounts'), wenv, ctx);
       assert.strictEqual(local.status, 200);
       assert.strictEqual((await local.json()).status, 'success');
       // ...and with no APP_PASS set at all, which is exactly what a fresh checkout has.
-      const bare = await worker.fetch(new Request('http://127.0.0.1/api?action=getRecurring'), env, ctx);
+      const bare = await worker.fetch(new Request('http://127.0.0.1/api?action=getAccounts'), env, ctx);
       assert.strictEqual((await bare.json()).status, 'success');
-      assert.strictEqual((await call('/api?action=getRecurring')).status, 401);
+      assert.strictEqual((await call('/api?action=getAccounts')).status, 401);
     });
 
     test('/api enforces the GET/POST split and answers errors as JSON 200', async () => {
@@ -1847,7 +1905,7 @@ function d1(db) {
       const tagOf = async (url) => (await raw(url, h)).headers.get('ETag');
       const augBefore = await tagOf('/api?action=getBudgets&month=2026-Aug');
       const janBefore = await tagOf('/api?action=getBudgets&month=2026-Jan');
-      const recBefore = await tagOf('/api?action=getRecurring');
+      const recBefore = await tagOf('/api?action=listTable&table=recurring');
       const metaBefore = await tagOf('/api?action=listTable&table=meta');
       await api.createTransaction({ ID: 'etag-1', Date: '2026-08-19', Category: 'Expense: Food',
                                     Account: 'Maya', Amount: 250 }, env);
@@ -1855,7 +1913,7 @@ function d1(db) {
         'August changed and its tag did not move — the screen would go stale');
       assert.strictEqual(await tagOf('/api?action=getBudgets&month=2026-Jan'), janBefore,
         'an August write moved the January tag — a month-scoped key must not refetch');
-      assert.strictEqual(await tagOf('/api?action=getRecurring'), recBefore,
+      assert.strictEqual(await tagOf('/api?action=listTable&table=recurring'), recBefore,
         'an unrelated payload moved — the tag is not over its own bytes');
       assert.strictEqual(await tagOf('/api?action=listTable&table=meta'), metaBefore,
         'an admin page moved on a transaction write');
@@ -1880,11 +1938,10 @@ function d1(db) {
     test('every read route answers the same bytes twice', async () => {
       // The one way an ETag dies silently: a clock (or anything else per-request) in a
       // read payload makes every tag unique, so nothing ever 304s and nobody notices —
-      // the app just quietly costs what it used to. getExportAll is exempt: it stamps
-      // exportedAt on purpose, and it is the backup puller's, not a cached screen.
+      // the app just quietly costs what it used to.
       const h = await cookie();
       const ARGS = { listTable: '&table=meta' };   // the only read that needs one to succeed
-      const routes = Object.keys((await load('worker.js')).ROUTES_READ).filter((n) => n !== 'getExportAll');
+      const routes = Object.keys((await load('worker.js')).ROUTES_READ);
       for (const action of routes) {
         const url = '/api?action=' + action + (ARGS[action] || '');
         const one = await raw(url, h);
@@ -1940,16 +1997,29 @@ function d1(db) {
       assert.strictEqual(fxOf('ba-3'), 50);
       // A real currency change does re-stamp: pesos carry none.
       await api.createTransaction({ ID: 'ba-5', Date: '2026-03-11', Category: 'Expense: Food', Account: 'Wise', Amount: 10 }, env);
-      await api.updateTransaction({ ID: 'ba-5', Account: 'Maya' }, at(58));
+      await api.updateTransaction({ ID: 'ba-5', Account: 'Maya', Amount: 10 }, at(58));
       assert.strictEqual(fxOf('ba-5'), null);
     });
 
     test('a bulk reassign re-stamps only the rows whose currency changes', async () => {
       await api.createTransaction({ ID: 'ba-6', Date: '2026-03-12', Category: 'Expense: Food', Account: 'Wise', Amount: 10 }, env);
       await api.createTransaction({ ID: 'ba-7', Date: '2026-03-12', Category: 'Expense: Food', Account: 'Maya', Amount: 10 }, env);
-      await api.bulkUpdateTransactions({ ids: ['ba-6', 'ba-7'], patch: { Account: 'Wise Two' } }, at(58));
+      // Moving a peso row onto a dollar account must restate its amount (below).
+      await api.bulkUpdateTransactions({ ids: ['ba-6', 'ba-7'], patch: { Account: 'Wise Two', Amount: 10 } }, at(58));
       assert.strictEqual(fxOf('ba-6'), 50, 'dollars to dollars must keep the stamped rate');
       assert.strictEqual(fxOf('ba-7'), 58, 'pesos to dollars takes the rate of the day');
+    });
+
+    test('a move to another currency must restate the amount', async () => {
+      // ₱500 moved onto a dollar account kept the number and became $500 (~₱28,500).
+      await api.createTransaction({ ID: 'cm-1', Date: '2026-03-14', Category: 'Expense: Food', Account: 'Maya', Amount: 500 }, env);
+      await assert.rejects(api.updateTransaction({ ID: 'cm-1', Account: 'Wise' }, env), /enter the amount in USD/);
+      await assert.rejects(api.bulkUpdateTransactions({ ids: ['cm-1'], patch: { Account: 'Wise' } }, env), /enter the amount in USD/);
+      const row = (await api.listTransactions({ id: 'cm-1' }, env)).transactions[0];
+      assert.strictEqual(row.Account, 'Maya', 'a refused move must write nothing');
+      // Same currency moves freely; the edit form, which always sends Amount, still works.
+      await api.updateTransaction({ ID: 'cm-1', Account: 'Wise', Amount: 9 }, env);
+      assert.strictEqual((await api.listTransactions({ id: 'cm-1' }, env)).transactions[0].Amount, 9);
     });
 
     test('a rate typed against a PHP account is ignored', async () => {
@@ -1961,7 +2031,7 @@ function d1(db) {
 
     test('no edit can make a transfer to itself', async () => {
       await assert.rejects(api.updateTransaction({ ID: 'ba-4', ToAccount: 'Wise' }, env), /must differ/);
-      await assert.rejects(api.bulkUpdateTransactions({ ids: ['ba-4'], patch: { Account: 'Maya' } }, env), /must differ/);
+      await assert.rejects(api.bulkUpdateTransactions({ ids: ['ba-4'], patch: { Account: 'Maya', Amount: 100 } }, env), /must differ/);
     });
 
     test('a money cell takes a thousands separator instead of clearing itself', async () => {

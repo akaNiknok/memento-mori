@@ -33,7 +33,7 @@ Use `npx wrangler secret put <NAME>` in the `worker/` folder.
 | Secret | Function |
 | --- | --- |
 | `APP_PASS` | The passphrase of the app. The cookie holds the SHA-256 hash and is valid for one year. If you change it, each device must sign in again. Use a long passphrase, because the login route does not limit the attempts. |
-| `SECRET_TOKEN` | Telegram sends this value in a header. It must be the same as the script property `TELEGRAM_SECRET_TOKEN`. |
+| `SECRET_TOKEN` | Telegram sends this value in a header. It must be the same as the script property `TELEGRAM_SECRET_TOKEN`. If it is not set, the bot refuses every message. |
 | `TELEGRAM_BOT_TOKEN` | The bot token from BotFather. |
 | `TELEGRAM_USER_ID` | The only Telegram user that the bot answers. |
 | `GEMINI_API_KEY` | The key from Google AI Studio. |
