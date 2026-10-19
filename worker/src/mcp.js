@@ -78,6 +78,11 @@ export const TOOLS = {
       minAmount: { type: 'number', description: 'PHP magnitude.' }, maxAmount: { type: 'number' },
       source: { type: 'string', enum: ['tg', 'gm', 'ui', 'interest', 'legacy'],
         description: 'Where the row came from: tg = Telegram bot, gm = Gmail ingest, ui = the app, legacy = the sheet era.' },
+      notCategory: { type: 'string', description: "Exclude this category, e.g. 'Transfer: Internal'." },
+      notAccount: { type: 'string' }, notSegment: { type: 'string' },
+      notType: { type: 'string', enum: ['Income', 'Expense', 'Transfer'] },
+      notSearch: { type: 'string', description: 'Exclude rows whose description or category contains this.' },
+      notSource: { type: 'string', enum: ['tg', 'gm', 'ui', 'interest', 'legacy'] },
       limit: { type: 'integer', description: 'Max ' + MAX_TX + '. Default 100.' }, offset: { type: 'integer' }
     }
   }

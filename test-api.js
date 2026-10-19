@@ -284,6 +284,23 @@ function d1(db) {
                 'the date filter is not one exact day');
     });
 
+    test('listTransactions: every not-filter is the exact complement of its twin', async () => {
+      const n = async (a) => (await api.listTransactions(a, env)).total;
+      const all = await n({});
+      const cats = (await api.listTransactions({ limit: 100 }, env)).transactions;
+      const segName = cats.map((t) => t.Segment).find(Boolean)
+        || (await api.getCategories({}, env)).categories.find((c) => c.segment).segment;
+      for (const [k, v] of [['account', 'IBKR'], ['category', cats[0].Category], ['segment', segName],
+                            ['type', 'Expense'], ['search', 'grocer'], ['source', 'legacy']]) {
+        const pos = await n({ [k]: v }), notK = 'not' + k[0].toUpperCase() + k.slice(1);
+        assert.ok(pos > 0, k + ' matched nothing; the test proves nothing');
+        // A row with no segment / no to-account must count as "not it", not vanish.
+        assert.strictEqual(await n({ [notK]: v }), all - pos, notK);
+      }
+      assert.strictEqual(await n({ type: 'Expense', notType: 'Expense' }), 0);
+      await assert.rejects(api.listTransactions({ notCategory: 'Nope' }, env), /Unknown category/);
+    });
+
     test('listTransactions: amount bounds, source, and the net of the whole set', async () => {
       const aug = await api.listTransactions({ month: '2026-Aug', type: 'Expense', limit: 1 }, env);
       assert.strictEqual(aug.net, -(250.5 + 1200), 'net must cover every row, not the page');
@@ -306,8 +323,8 @@ function d1(db) {
     test('setSmartLists: validated, capped, echoed in getBootstrap', async () => {
       await assert.rejects(api.setSmartLists({ lists: [{ name: ' ', filters: {} }] }, env), /needs a name/);
       await assert.rejects(api.setSmartLists({ lists: Array(21).fill({ name: 'x' }) }, env), /at most 20/);
-      const r = await api.setSmartLists({ lists: [{ name: 'Big food', filters: { category: 'Expense: Food', minAmount: 500, bogus: 'x', search: '' } }] }, env);
-      assert.deepStrictEqual(r.smartLists, [{ name: 'Big food', filters: { category: 'Expense: Food', minAmount: '500' } }]);
+      const r = await api.setSmartLists({ lists: [{ name: 'Big food', filters: { category: 'Expense: Food', minAmount: 500, bogus: 'x', search: '', notAccount: 'Maya' } }] }, env);
+      assert.deepStrictEqual(r.smartLists, [{ name: 'Big food', filters: { category: 'Expense: Food', minAmount: '500', notAccount: 'Maya' } }]);
       assert.deepStrictEqual((await api.getBootstrap({}, env)).smartLists, r.smartLists);
       await api.setSmartLists({ lists: [] }, env);
     });
