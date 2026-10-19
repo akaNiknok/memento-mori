@@ -703,6 +703,7 @@ table.tbl td.editing{padding:0}
 .tok-field input{flex:1;min-width:60px;border:0;outline:0;background:none;color:var(--text);font:inherit;font-size:16px;padding:4px 0}
 .tok{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 2px 0 10px;border-radius:15px;background:var(--accent-tint);
   color:var(--accent);font-size:14px;font-weight:600;white-space:nowrap;max-width:100%;overflow:hidden}
+.tok.not{background:var(--neg-tint);color:var(--neg)}
 .tok-f{font-weight:400;opacity:.8}
 .tok-x{position:relative;width:26px;height:26px;border:0;border-radius:13px;background:none;color:inherit;display:grid;place-items:center;padding:0;flex:none}
 .tok-x::before{content:"";position:absolute;inset:-9px}      /* 44px target */

@@ -377,23 +377,37 @@ export async function listTransactions(args, env) {
   if (args.date) add('t.date = ?', String(args.date));
   if (args.from) add('t.date >= ?', String(args.from));
   if (args.to) add('t.date <= ?', String(args.to));
-  // A name nobody has resolves to an error, not an empty page: an AI caller that guesses
-  // "Food" for "Expense: Food" must not read zero rows as zero spend (2026-09-30).
-  if (args.account) {
-    const a = resolveAccount(r, String(args.account));
-    if (!a) throw new Error('Unknown account: ' + args.account);
-    add('(t.account_id = ? OR t.to_account_id = ?)', a.id, a.id);
+  // Each of these also has a not-twin (notCategory…): the same clause, negated with
+  // IS NOT 1 rather than NOT, so a NULL (no segment, no to-account) counts as "not it".
+  const neg = (sql) => '(' + sql + ') IS NOT 1';
+  for (const not of [false, true]) {
+    const arg = (name) => args[not ? 'not' + name[0].toUpperCase() + name.slice(1) : name];
+    const put = (sql, ...v) => add(not ? neg(sql) : sql, ...v);
+    // A name nobody has resolves to an error, not an empty page: an AI caller that guesses
+    // "Food" for "Expense: Food" must not read zero rows as zero spend (2026-09-30).
+    if (arg('account')) {
+      const a = resolveAccount(r, String(arg('account')));
+      if (!a) throw new Error('Unknown account: ' + arg('account'));
+      put('t.account_id = ? OR t.to_account_id = ?', a.id, a.id);
+    }
+    if (arg('category')) {
+      const c = resolveCategory(r, String(arg('category')));
+      if (!c) throw new Error('Unknown category: ' + arg('category') + '. get_categories lists them.');
+      put('t.category_id = ?', c.id);
+    }
+    if (arg('segment')) put('c.segment = ?', String(arg('segment')));
+    if (arg('type')) put('c.type = ?', String(arg('type')));
+    // The v1 haystack was Description + " " + Category, matched as one string — keep it
+    // concatenated so a term spanning the two still matches. LIKE is ASCII-case-insensitive.
+    if (arg('search')) put("(COALESCE(t.description,'') || ' ' || c.name) LIKE ?", '%' + String(arg('search')) + '%');
+    // Where a row came from is its id prefix; anything else is legacy (sheet-era ids).
+    if (arg('source')) {
+      const src = String(arg('source'));
+      if (TX_SOURCES.includes(src)) put('t.id LIKE ?', src + '-%');
+      else if (src === 'legacy') put(TX_SOURCES.map(() => 't.id NOT LIKE ?').join(' AND '), ...TX_SOURCES.map((x) => x + '-%'));
+      else throw new Error('Unknown source: ' + src);
+    }
   }
-  if (args.category) {
-    const c = resolveCategory(r, String(args.category));
-    if (!c) throw new Error('Unknown category: ' + args.category + '. get_categories lists them.');
-    add('t.category_id = ?', c.id);
-  }
-  if (args.segment) add('c.segment = ?', String(args.segment));
-  if (args.type) add('c.type = ?', String(args.type));
-  // The v1 haystack was Description + " " + Category, matched as one string — keep it
-  // concatenated so a term spanning the two still matches. LIKE is ASCII-case-insensitive.
-  if (args.search) add("(COALESCE(t.description,'') || ' ' || c.name) LIKE ?", '%' + String(args.search) + '%');
   // Amount bounds are peso magnitudes. On a share-priced source amount_php_u is a share
   // QUANTITY (NOT_SHARES_SRC), so a bounded search leaves those rows out rather than
   // matching 2 shares as 2 pesos.
@@ -401,13 +415,6 @@ export async function listTransactions(args, env) {
   if (!isNaN(minU) || !isNaN(maxU)) add(NOT_SHARES_SRC);
   if (!isNaN(minU)) add('ABS(t.amount_php_u) >= ?', toU(minU));
   if (!isNaN(maxU)) add('ABS(t.amount_php_u) <= ?', toU(maxU));
-  // Where a row came from is its id prefix; anything else is legacy (sheet-era ids).
-  if (args.source) {
-    const src = String(args.source);
-    if (TX_SOURCES.includes(src)) add('t.id LIKE ?', src + '-%');
-    else if (src === 'legacy') add(TX_SOURCES.map(() => 't.id NOT LIKE ?').join(' AND '), ...TX_SOURCES.map((x) => x + '-%'));
-    else throw new Error('Unknown source: ' + src);
-  }
 
   const from = ' FROM transactions t JOIN categories c ON c.id = t.category_id ' +
                'JOIN accounts a ON a.id = t.account_id LEFT JOIN accounts ta ON ta.id = t.to_account_id ' +
@@ -1137,7 +1144,8 @@ export async function setWidgetAccounts(args, env) {
 /** meta key holding the saved filter sets: JSON [{name, filters}], at most 20. */
 const SMART_META = 'smart_lists';
 const SMART_KEYS = ['month', 'date', 'type', 'category', 'segment', 'account', 'source',
-                    'minAmount', 'maxAmount', 'search'];
+                    'minAmount', 'maxAmount', 'search', 'notType', 'notCategory', 'notSegment',
+                    'notAccount', 'notSource', 'notSearch'];
 export function smartLists(v) {
   try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a.slice(0, 20) : []; }
   catch (e) { return []; }

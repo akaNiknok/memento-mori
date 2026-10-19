@@ -1534,9 +1534,14 @@ function renderDashboard(){
  *  floating bulk bar and the inline single-field editors. From 1200px: a filter
  *  pane and a table. Below: a list grouped by day and a Filters sheet.
  * ════════════════════════════════════════════════════════════════════════ */
-var TX_KEYS=['month','date','type','category','segment','account','source','minAmount','maxAmount','search'];
+// Each NOT_KEYS key k has an exclusion twin notK ("not Transfer: Internal").
+var NOT_KEYS=['type','category','segment','account','source','search'];
+function notKey(k){ return 'not'+k[0].toUpperCase()+k.slice(1); }
+function baseKey(k){ return /^not[A-Z]/.test(k)?k[3].toLowerCase()+k.slice(4):k; }
+var TX_KEYS=['month','date','type','category','segment','account','source','minAmount','maxAmount','search'].concat(NOT_KEYS.map(notKey));
 var TOKEN_LABEL={month:'Month',date:'Date',type:'Type',category:'Category',segment:'Segment',account:'Account',
   source:'Source',minAmount:'Amount',maxAmount:'Amount',search:'Text'};
+NOT_KEYS.forEach(function(k){ TOKEN_LABEL[notKey(k)]='Not '+TOKEN_LABEL[k].toLowerCase(); });
 var TYPE_WORD={Expense:'Spent',Income:'Earned',Transfer:'Moved'};
 var SOURCES={tg:'Telegram',gm:'Gmail',ui:'App',interest:'Interest',legacy:'Legacy'};
 var SOURCE_WORDS={tg:['telegram','bot'],gm:['gmail','email','mail'],ui:['app'],interest:['interest'],legacy:['legacy','sheet']};
@@ -1549,6 +1554,7 @@ function activeTokens(f){
   return TX_KEYS.filter(function(k){ return f[k]!=null&&f[k]!==''; }).map(function(k){ return {k:k,v:String(f[k])}; });
 }
 function tokenText(k,v){
+  k=baseKey(k);
   if(k==='month'){ var d=monthKey2date(v); return d?MONTHS_FULL[d.getMonth()]+' '+d.getFullYear():String(v); }
   if(k==='date') return dayMonth(v,{year:'always'});
   if(k==='type') return TYPE_WORD[v]||v;
@@ -1597,10 +1603,14 @@ function dateFromText(lo, now){
  *   sep 17, 17 sep, 9/17 → Date first, then Text
  *   otherwise any of: Month, Type (spent/earned/moved), Source (gmail, telegram…),
  *   Segment, Amount (a bare number = at least), the 3 best Category and Account
- *   matches, and always Text contains. */
+ *   matches, and always Text contains.
+ *   "not …" or "-…" → the same guesses as exclusions, for the keys that have one. */
 function parseTokens(text, ctx){
   var q=String(text||'').trim(), lo=q.toLowerCase(), out=[];
   if(!q) return out;
+  var neg=/^(?:not\s+|-)(.+)$/i.exec(q);
+  if(neg) return parseTokens(neg[1],ctx).filter(function(t){ return NOT_KEYS.indexOf(t.k)>=0; })
+    .map(function(t){ return {k:notKey(t.k),v:t.v}; });
   var quoted=/^"([^"]+)"?$/.exec(q);
   if(quoted) return [{k:'search',v:quoted[1]}];
   var cmp=/^(>=|<=|>|<|≥|≤)\s*(.+)$/.exec(q), n=cmp?amountOf(cmp[2]):null;
@@ -1734,7 +1744,7 @@ function tokenField(){
   var wrap=el('div','tok-wrap'), box=el('label','tok-field');
   box.innerHTML=icon('search');
   activeTokens(S.tx.filters).forEach(function(t){
-    var c=el('span','tok','<span class="tok-f">'+esc(TOKEN_LABEL[t.k])+'</span>'+esc(tokenText(t.k,t.v)));
+    var c=el('span',baseKey(t.k)===t.k?'tok':'tok not','<span class="tok-f">'+esc(TOKEN_LABEL[t.k])+'</span>'+esc(tokenText(t.k,t.v)));
     var x=el('button','tok-x',icon('close')); x.type='button'; x.setAttribute('aria-label','Remove the '+TOKEN_LABEL[t.k]+' filter');
     x.onclick=function(e){ e.preventDefault(); setTxFilter(t.k,'',true); };
     c.appendChild(x); box.appendChild(c);
@@ -1758,7 +1768,7 @@ function tokenField(){
       o.onmouseenter=function(){ act=i; mark(); };
       menu.appendChild(o);
     });
-    menu.appendChild(el('div','tok-hint','Try: >500 · aug · transfer · gmail · "exact words"'));
+    menu.appendChild(el('div','tok-hint','Try: >500 · aug · transfer · gmail · not food · "exact words"'));
     mark(); menu.hidden=false;
   }
   inp.oninput=draw;

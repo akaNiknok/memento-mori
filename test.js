@@ -835,6 +835,10 @@ describe('Gmail courier watermark (vm)', () => {
       assert.ok(P('300').some((t) => t.k === 'minAmount' && t.v === '300'), 'a bare number is "at least"');
       assert.deepStrictEqual(P('gcash').pop(), { k: 'search', v: 'gcash' });
       assert.deepStrictEqual(P('  '), []);
+      assert.ok(P('not gro').some((t) => t.k === 'notCategory' && t.v === 'Food: Groceries'));
+      assert.ok(P('-transfer').some((t) => t.k === 'notType' && t.v === 'Transfer'));
+      assert.ok(!P('not aug').some((t) => t.k === 'month' || t.k === 'notMonth'), 'month has no exclusion');
+      assert.strictEqual(app.tokenText('notType', 'Transfer'), 'Moved');
       // parseAdd: the add field's instant, local pass.
       const qctx = { accounts: ['GCash', 'GrabPay', 'Wise USD', 'Maya'], descCategory: { vitamins: 'Health: Medical' } };
       const A = (t) => JSON.parse(JSON.stringify(app.parseAdd(t, qctx)));
