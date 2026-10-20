@@ -882,6 +882,7 @@ table.tbl td.editing{padding:0}
 .ed-link:active,.ed-opt:active,.ed-del:active{background:var(--card-2)}
 .ed-val{flex:1;min-width:0;display:flex;align-items:center;justify-content:flex-end;gap:6px;color:var(--dim)}
 .ed-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ed-txt.b{font-weight:600}
 .ed-val .acct-dot,.ed-opt .acct-dot{margin:0}
 .ed-link>.ico{width:18px;height:18px;transform:rotate(-90deg);color:var(--dim);flex:none}
 .ed-morebtn .ed-lab{color:var(--accent)}
