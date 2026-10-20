@@ -428,7 +428,7 @@ function monthPickerEl(){
   };
   return mp;
 }
-function buildMonthList(){
+function buildMonthList(ahead){
   var out=[], now=new Date();
   // Extend back to the oldest ledger month so older history is reachable; floor at
   // 15 months (before any data lands) and cap at 120 to bound a huge/garbled ledger.
@@ -440,7 +440,7 @@ function buildMonthList(){
   }
   // Starts at i=-1 (NEXT month) so income booked forward via Period — salary paid on
   // the 29th for the following month — is both selectable and viewable.
-  for(var i=-1;i<count;i++){var d=new Date(now.getFullYear(),now.getMonth()-i,1);out.push(monthKey(d));}
+  for(var i=-(ahead||1);i<count;i++){var d=new Date(now.getFullYear(),now.getMonth()-i,1);out.push(monthKey(d));}
   return out;
 }
 // "2026-Jun" → Date(first of month); null on bad input.
@@ -3559,7 +3559,7 @@ function edInput(g,label,value,o){
 function edNum(i){ var v=String(i.value).replace(/[,\s₱]/g,''); return v===''?NaN:Number(v); }
 function edDot(c){ return c?'<span class="acct-dot" style="background:'+esc(c)+'"></span>':''; }
 function edItems(options){
-  return options.map(function(o){ return typeof o==='object'?{value:String(o.value),label:String(o.label),color:o.color}:{value:String(o),label:String(o)}; });
+  return options.map(function(o){ return typeof o==='object'?{value:String(o.value),label:String(o.label),color:o.color,bold:o.bold}:{value:String(o),label:String(o)}; });
 }
 // A row that shows its value and pushes a picker page. Exposes .value and .onpick.
 function edPickRow(g,label,options,value,ph){
@@ -3589,7 +3589,7 @@ function openPicker(title,items,cur,done){
     list.innerHTML='';
     if(!f.length) list.appendChild(el('div','ed-row ed-empty','No match'));
     f.forEach(function(it){
-      var on=it.value===cur, r=el('button','ed-row ed-opt'+(on?' on':''),(anyC?edDot(it.color||'transparent'):'')+'<span class="ed-txt">'+esc(it.label)+'</span>'+(on?icon('check'):''));
+      var on=it.value===cur, r=el('button','ed-row ed-opt'+(on?' on':''),(anyC?edDot(it.color||'transparent'):'')+'<span class="ed-txt'+(it.bold?' b':'')+'">'+esc(it.label)+'</span>'+(on?icon('check'):''));
       r.type='button'; r.onclick=function(){ pick(it.value); }; list.appendChild(r);
     });
     return f;
@@ -3638,7 +3638,11 @@ function edDelete(page,t){
   var g=edGroup(page.body), d=el('button','ed-row ed-del','Delete transaction'); d.type='button';
   d.onclick=function(){ confirmDelete(t); }; g.appendChild(d);
 }
-function periodItems(){ return [{value:'',label:"The date's month"}].concat(monthOptions()); }
+// Three months ahead, for a bill or salary booked forward; the current month is bold.
+function periodItems(){
+  var now=monthKey(new Date());
+  return [{value:'',label:"The date's month"}].concat(buildMonthList(3).map(function(m){ return {value:m,label:monthLabel(m),bold:m===now}; }));
+}
 function catItems(cats){
   return cats.map(function(c){ var s=((S.boot.categories||{})[c]||{}).Segment; return {value:c,label:c,color:SEG_COLOR[s]}; });
 }
