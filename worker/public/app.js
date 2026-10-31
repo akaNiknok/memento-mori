@@ -1811,10 +1811,12 @@ function loadPaneAccts(host){
     host=host||$('#paneAccts'); if(!host) return;
     host.innerHTML='';
     (res.accounts||[]).forEach(function(a){
-      var on=S.tx.filters.account===a.name;
+      var on=S.tx.filters.account===a.name, av=a.isLiability&&a.availableCredit!=null;
       var r=el('div','pane-row'+(on?' on':'')), b=el('button','pane-btn',
         '<span class="acct-dot" style="background:'+(isHex6(a.color)?a.color:'var(--dim)')+'"></span>'+
-        '<span class="pane-n">'+esc(a.name)+'</span><span class="pane-v'+(a.isLiability?' neg':'')+'">'+esc(acctMain(a))+'</span>');
+        '<span class="pane-n">'+esc(a.name)+'</span>'+(av
+          ?'<span class="pane-v" title="Available credit">'+esc(money(a.availableCredit))+' avail</span>'
+          :'<span class="pane-v'+(a.isLiability?' neg':'')+'">'+esc(acctMain(a))+'</span>'));
       b.type='button'; b.onclick=function(){ setTxFilter('account',on?'':a.name); };
       r.appendChild(b); host.appendChild(r);
     });
