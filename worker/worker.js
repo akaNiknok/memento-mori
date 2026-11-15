@@ -11,7 +11,8 @@
  *   POST /tg     — the Telegram webhook. Same URL as before, so no setWebhook re-run.
  *                  Does the work FIRST and answers after (v2.11.0); a turn that dies
  *                  anyway is re-run from D1 by the 2-minute drain cron (v2.12.0).
- *   POST /login  — passphrase -> sha256(APP_PASS) cookie (HttpOnly/Secure/Lax, 1yr).
+ *   POST /login  — passphrase -> sha256(APP_PASS[|SESSION_SALT]) cookie (HttpOnly/Secure/Lax, 1yr);
+ *                  5 attempts a minute per address (PASS_LIMIT), then 429.
  *   POST /mcp    — read-only MCP for AI clients, own token AI_READ_TOKEN (src/mcp.js).
  *   /authorize, /token, /register, /.well-known/oauth-* — OAuth for /mcp (src/oauth.js).
  *   GET|POST /api — the JSON API. GET = reads, POST = writes; the split comes from the
@@ -48,7 +49,7 @@ import {
 import { handleUpdate, ingestEmail } from './src/telegram.js';
 import { runScheduled } from './src/jobs.js';
 import { mcp } from './src/mcp.js';
-import { oauth, OAUTH_PATHS } from './src/oauth.js';
+import { oauth, OAUTH_PATHS, passLimited } from './src/oauth.js';
 
 const COOKIE = 'mm_auth';
 
@@ -151,16 +152,22 @@ async function telegram(request, env) {
 async function login(request, env) {
   if (request.method !== 'POST') return new Response('method not allowed', { status: 405 });
   const body = await request.json().catch(() => ({}));
-  // ponytail: plain compare, no rate limiting — use a long random passphrase and the
-  // free plan's 100k requests/day is the brute-force ceiling. Add Turnstile or a KV
-  // attempt counter only if this ever gets more than one user.
+  if (await passLimited(request, env)) return new Response('too many attempts', { status: 429 });
   if (!env.APP_PASS || body.pass !== env.APP_PASS) return new Response('unauthorized', { status: 401 });
   return new Response('ok', {
     headers: {
-      'Set-Cookie': `${COOKIE}=${await sha256(env.APP_PASS)}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`
+      'Set-Cookie': `${COOKIE}=${await session(env)}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`
     }
   });
 }
+
+/**
+ * The cookie value. SESSION_SALT is the "sign out everywhere" switch: set it to any new
+ * value and every cookie already issued stops matching, with the passphrase untouched.
+ * Unset = the bare hash, so the release that added it signed nobody out.
+ * ponytail: a secret, not a `meta` row — a row would cost a D1 read on every /api call.
+ */
+const session = (env) => sha256(env.APP_PASS + (env.SESSION_SALT ? '|' + env.SESSION_SALT : ''));
 
 /**
  * Is the caller allowed? The SPA presents the cookie; the two Apps Script jobs present
@@ -171,7 +178,7 @@ async function authorized(request, env) {
   const bearer = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
   if (env.INGEST_TOKEN && bearer && bearer === env.INGEST_TOKEN) return true;
   if (!env.APP_PASS) return false;
-  const want = `${COOKIE}=${await sha256(env.APP_PASS)}`;
+  const want = `${COOKIE}=${await session(env)}`;
   return (request.headers.get('Cookie') || '').split(/;\s*/).includes(want);
 }
 

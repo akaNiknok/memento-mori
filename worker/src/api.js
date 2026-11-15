@@ -645,6 +645,7 @@ export async function getDashboard(args, env, pre) {
   const closedKeys = [1, 2, 3].map((i) => { const p = shiftMonth(now.y, now.m, -i); return monthKey(p.y, p.m); });
   // The last day of the last closed month: day 0 of the live month.
   const closeDay = new Date(Date.UTC(now.y, now.m, 0)).toISOString().slice(0, 10);
+  const live = month === manilaMonth();
 
   const [[spend, flow, recent, snaps, closed, lastSnap], fireReturn, netAtClose] = await Promise.all([
     env.DB.batch([
@@ -658,8 +659,10 @@ export async function getDashboard(args, env, pre) {
         'JOIN categories c ON c.id = t.category_id ' +
         "WHERE t.month IN (" + list(flowKeys.length) + ") AND c.type IN ('Income','Expense') " +
         'GROUP BY m, type').bind(...flowKeys),
-      env.DB.prepare('SELECT * FROM transactions ORDER BY date DESC, rowid DESC LIMIT 10'),
-      env.DB.prepare('SELECT month, net_worth_u, shares_u FROM nw_snapshots WHERE month IN (' + list(flowKeys.length) + ')').bind(...flowKeys),
+      // A month that is not the live one lists ITS rows, so today's write leaves it alone.
+      live ? env.DB.prepare('SELECT * FROM transactions ORDER BY date DESC, rowid DESC LIMIT 10')
+           : env.DB.prepare('SELECT * FROM transactions WHERE month = ? ORDER BY date DESC, rowid DESC LIMIT 10').bind(month),
+      env.DB.prepare('SELECT month, net_worth_u, assets_u, liabilities_u, shares_u FROM nw_snapshots WHERE month IN (' + list(flowKeys.length) + ')').bind(...flowKeys),
       env.DB.prepare(
         'SELECT c.type AS type, SUM(t.amount_php_u) AS s FROM transactions t ' +
         'JOIN categories c ON c.id = t.category_id ' +
@@ -717,10 +720,19 @@ export async function getDashboard(args, env, pre) {
     today: manilaToday()
   });
 
+  // A CLOSED month reports its own close, not today's figures. The live hero on every
+  // month made every write move every month's ETag, so browsing back after one entry
+  // re-downloaded each month in full; a snapshot never moves, so those now answer 304.
+  // A month with no snapshot (before history began, or next month) keeps the live figures.
+  const snap = live ? null : snaps.results.find((s) => s.month === month && s.assets_u != null);
+  const hero = snap
+    ? { netWorth: fromU(snap.net_worth_u), assets: fromU(snap.assets_u), liabilities: fromU(snap.liabilities_u), sharesValue: fromU(snap.shares_u) }
+    : totals;
+
   return {
-    status: 'success', month, fire,
-    netWorth: q2(totals.netWorth), assets: q2(totals.assets), liabilities: q2(totals.liabilities),
-    sharesValue: q2(totals.sharesValue),
+    status: 'success', month, fire, asOfClose: !!snap,
+    netWorth: q2(hero.netWorth), assets: q2(hero.assets), liabilities: q2(hero.liabilities),
+    sharesValue: q2(hero.sharesValue),
     spendBySegment, spendByCategory,
     cashflow: flowKeys.map((k) => byMonth[k]),
     netWorthHistory, sharesHistory,

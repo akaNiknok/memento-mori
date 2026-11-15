@@ -32,7 +32,8 @@ Use `npx wrangler secret put <NAME>` in the `worker/` folder.
 
 | Secret | Function |
 | --- | --- |
-| `APP_PASS` | The passphrase of the app. The cookie holds the SHA-256 hash and is valid for one year. If you change it, each device must sign in again. Use a long passphrase, because the login route does not limit the attempts. |
+| `APP_PASS` | The passphrase of the app. The cookie holds a SHA-256 hash and is valid for one year. If you change it, each device must sign in again. The login route and the consent page for claude.ai permit five attempts each minute from one address. |
+| `SESSION_SALT` | Optional. It signs out each device and does not change the passphrase. Put a new random value, and each device and widget must sign in again. |
 | `SECRET_TOKEN` | Telegram sends this value in a header. It must be the same as the script property `TELEGRAM_SECRET_TOKEN`. If it is not set, the bot refuses every message. |
 | `TELEGRAM_BOT_TOKEN` | The bot token from BotFather. |
 | `TELEGRAM_USER_ID` | The only Telegram user that the bot answers. |
@@ -275,7 +276,8 @@ The code and the database do not go back together. Undo the code first.
 | The AI client gets `401` from `/mcp`. | The client sends a value that is not the same as the secret `AI_READ_TOKEN`, or the secret is not set. The app passphrase and `INGEST_TOKEN` do not open `/mcp`. |
 | claude.ai cannot add the connector, or it shows "invalid_redirect_uri". | Claude sent a callback address that the Worker does not know. The list of addresses is `CALLBACKS` in `worker/src/oauth.js`. Add the new address with a test. |
 | The claude.ai connector stops after 30 days with no use, or 90 days after you connected. | The refresh token expired, or the 90-day limit ended the connection. Connect again from the connector settings. |
-| The app asks for the passphrase frequently. | A person changed `APP_PASS`, or the cookie is more than one year old. |
+| The app asks for the passphrase frequently. | A person changed `APP_PASS` or `SESSION_SALT`, or the cookie is more than one year old. |
+| The login shows "Too many attempts". | The address made five attempts in one minute. Wait one minute. |
 | The app shows "Storage is full" and does not save the entry. | The device has no free space for the offline queue. The app deletes the cached screens first, then makes a second attempt. This message means that the second attempt also failed. Delete files on the device. Then enter the transaction again, because the app did not record it. |
 | The app starts, but each request fails. | `npm run tail`. Usually the D1 binding or a secret is absent. |
 | The bot sends the message "share count drift". | The count of shares in the ledger does not agree with the count at IBKR. Examine a corporate action first, for example a split of shares. For a split, multiply the quantity of shares in each earlier transfer leg. Change the field **ToAmount** on a purchase. Change the field **Amount** on a sale. Change a leg before the effective date only. Then examine a trade that nobody recorded. The job does not write the count from IBKR, because that action hides the cause. |

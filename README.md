@@ -83,7 +83,7 @@ npm run dev:seed
 npm run dev
 ```
 
-Open the address that `wrangler` shows. The local app skips the passphrase, and `worker/seed.sql` fills each screen. The bot and the email job need their secrets, so they do not operate locally. Run `npm test` for the 153 tests.
+Open the address that `wrangler` shows. The local app skips the passphrase, and `worker/seed.sql` fills each screen. The bot and the email job need their secrets, so they do not operate locally. Run `npm test` for the 166 tests.
 
 ## Architecture
 
@@ -151,18 +151,18 @@ Each lesson comes from a real failure or a real measurement.
 | Frontend | approximately 5 130 lines, no framework and no bundler |
 | Apps Script | approximately 400 lines in 3 files, mail and backup only |
 | Dependencies | none at runtime, one for development |
-| Tests | 156 tests operate offline with `npm test`, and 110 of them use a real SQLite database |
+| Tests | 166 tests operate offline with `npm test`, and 119 of them use a real SQLite database |
 | Releases | 87 tagged versions, each one from one merge |
 | Transactions | more than 1 200 |
 | Monthly cost | none |
 
 ## Known limits
 
-- **One user.** The login uses one passphrase, and the route does not limit the attempts. A second user needs a different design.
+- **One user.** The login uses one passphrase. The route permits five attempts each minute from one address. A second user needs a different design.
 - **The share prices are one day old.** A nightly job writes them. No page reads a price service.
 - **The language model can read an email incorrectly.** Each receipt has an **Undo** button and a button that shows the source email.
-- **A screen that stays open does not refresh itself.** The app revalidates a screen when you go to it.
-- **The Summary screen downloads again after each write.** Each month of the Summary screen shows the live net worth, so each write changes the answer. The other screens answer 304.
+- **A screen that stays open does not refresh itself.** The app revalidates a screen when you go to it and when you return to the app. A timer costs mobile data, so there is none.
+- **The Summary screen downloads the live month again after each write.** The live month shows the live net worth, so each write changes the answer. A closed month shows its month-end figures and answers 304.
 - **The system does not know a corporate action.** A split of shares changes the price at IBKR and does not change the ledger. The nightly job compares the two counts and sends a message. A person corrects the earlier rows.
 - **A widget tap opens Safari.** iOS has no link that opens an installed web app, so the widget opens the app address in Safari.
 - **The Tax screen shows one year.** Use the year list at the top of the screen to see an earlier year.
