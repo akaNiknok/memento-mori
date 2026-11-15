@@ -196,7 +196,7 @@ function unlock(){
                         body:JSON.stringify({ pass:pass }) })
         .then(function(r){
           btn.disabled = false;
-          if (!r.ok){ err.textContent = 'Wrong passphrase'; err.hidden = false; $('#loginPass', f).select(); return; }
+          if (!r.ok){ err.textContent = r.status === 429 ? 'Too many attempts. Wait one minute.' : 'Wrong passphrase'; err.hidden = false; $('#loginPass', f).select(); return; }
           closeModal.onClose = null; closeModal();
           resolve();
         }, function(){
@@ -1223,7 +1223,7 @@ function nwTile(d,ser){
           ['= Net worth '+(br.live?'now':'at the '+monthLabel(br.month)+' close'),money(br.endNetWorth,true),true],
           ['Change',signedMoney(br.deltaNetWorth),true]],
     note:'Market, FX and timing is the rest: price and rate moves, and a flow logged in another month. If it stays negative, some spending may not be logged.'}:null;
-  var t=sumTile('t-nw','Net worth','<span class="hide-phone">Assets '+money(d.assets,true)+' · Liabilities −'+money(liabAbs,true)+'</span>',tipSpec);
+  var t=sumTile('t-nw',d.asOfClose?'Net worth at close':'Net worth','<span class="hide-phone">Assets '+money(d.assets,true)+' · Liabilities −'+money(liabAbs,true)+'</span>',tipSpec);
   t.appendChild(el('div','fig-hero',money(d.netWorth,true)));
   if(br){
     var up=br.deltaNetWorth>=0, row=el('div','nw-bridge');

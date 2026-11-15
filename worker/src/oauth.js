@@ -15,7 +15,7 @@
  *   * `typ` is signed in, so a code is never an access token and a refresh token is
  *     never either.
  *   * The consent page asks for APP_PASS — the same passphrase as /login, the same
- *     brute-force ceiling (see login() in worker.js).
+ *     attempt limit (passLimited, shared with login() in worker.js).
  * The one real defence is REDIRECTS: a code goes only to a callback in CALLBACKS, fixed
  * in code. /register refuses any other, and /authorize shows an error rather than
  * redirect to one. So the owner's passphrase can mint a code for Claude and nobody else.
@@ -59,6 +59,20 @@ export async function verify(env, token, typ) {
 export const OAUTH_PATHS = ['/authorize', '/token', '/register',
   '/.well-known/oauth-authorization-server', '/.well-known/oauth-protected-resource',
   '/.well-known/oauth-protected-resource/mcp'];
+
+/**
+ * True when this address has spent its passphrase attempts (PASS_LIMIT: 5 a minute).
+ * One counter for both doors that take APP_PASS, /login and the consent page, or the
+ * unlimited one is simply the one an attacker uses. Every attempt counts, a right one
+ * included. No binding (tests, a bare `wrangler dev`) = no limit, never a crash.
+ * ponytail: the binding counts per Cloudflare location and is eventually consistent, so
+ * the ceiling is approximate. Move to a Durable Object only if an exact count matters.
+ */
+export async function passLimited(request, env) {
+  if (!env.PASS_LIMIT) return false;
+  const { success } = await env.PASS_LIMIT.limit({ key: request.headers.get('CF-Connecting-IP') || 'none' });
+  return !success;
+}
 
 export async function oauth(request, env, url) {
   if (!env.AI_READ_TOKEN || !env.APP_PASS) return new Response('not found', { status: 404 });
@@ -107,6 +121,7 @@ async function authorize(request, env, url) {
     return page(q, 'The request is not valid. Connect again from Claude.', 400, false);
   }
   if (request.method !== 'POST') return page(q, '', 200, true);
+  if (await passLimited(request, env)) return page(q, 'Too many attempts. Wait one minute.', 429, true);
   if (p.get('pass') !== env.APP_PASS) return page(q, 'Wrong passphrase', 401, true);
   const code = await sign(env, { typ: 'code', cc: q.code_challenge, ru: q.redirect_uri, auth: now() }, CODE_TTL);
   const to = new URL(q.redirect_uri);

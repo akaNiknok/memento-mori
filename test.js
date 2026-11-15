@@ -639,6 +639,10 @@ describe('Gmail courier watermark (vm)', () => {
           val(x, 'database_name') + ' has no real database_id — run `wrangler d1 create` and paste it'));
       });
 
+      // The same trap for the passphrase limiter: without its copy staging has no limit.
+      assert.strictEqual(named('env.staging.ratelimits').length, named('ratelimits').length,
+        'every [[ratelimits]] needs an [[env.staging.ratelimits]] copy — bindings are not inherited');
+
       const trig = named('env.staging.triggers')[0];
       assert.ok(trig && /crons\s*=\s*\[\s*\]/.test(trig.body.join('\n')),
         '[env.staging.triggers] crons = [] is missing — staging would inherit the production cron');

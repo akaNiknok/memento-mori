@@ -36,7 +36,8 @@ export const TOOLS = {
   get_dashboard: {
     fn: getDashboard,
     description: 'Net worth (assets, liabilities), spend by category and segment, the cash-flow ' +
-      'history, the net-worth bridge (savings vs market/FX residual), budgets and recent rows.',
+      'history, the net-worth bridge (savings vs market/FX residual), budgets and recent rows. ' +
+      'A past month reports its month-end close (asOfClose: true), not today\'s figures.',
     props: { month: MONTH, months: { type: 'integer', description: 'Cash-flow window, 2-24 months. Default 6.' } }
   },
   get_accounts: {

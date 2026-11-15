@@ -476,6 +476,30 @@ function d1(db) {
       }
     });
 
+    test('getDashboard: a closed month reports its close, so a write today leaves it alone', async () => {
+      // The mobile-data contract: the ETag is over these bytes, so a closed month must
+      // not carry anything a write in the live month can move.
+      const ref = dbm.parseMonthKey(dbm.manilaMonth());
+      const p = dbm.shiftMonth(ref.y, ref.m, -1), prev = dbm.monthKey(p.y, p.m);
+      sqlite.exec("INSERT INTO nw_snapshots (month,net_worth_u,assets_u,liabilities_u,shares_u,taken_at) " +
+        "VALUES ('" + prev + "',90000000000,100000000000,-10000000000,25000000000,'x')");
+      try {
+        const before = await api.getDashboard({ month: prev }, env);
+        assert.strictEqual(before.asOfClose, true);
+        assert.deepStrictEqual([before.netWorth, before.assets, before.liabilities, before.sharesValue],
+          [90000, 100000, -10000, 25000]);
+        await api.createTransaction({ ID: 'close-live', Date: dbm.manilaToday(), Category: 'Expense: Food',
+                                      Account: 'Maya', Amount: 321 }, env);
+        assert.deepStrictEqual(await api.getDashboard({ month: prev }, env), before);
+        const now = await api.getDashboard({}, env);
+        assert.strictEqual(now.asOfClose, false, 'the live month is live');
+        assert.ok(now.recentTransactions.some((t) => t.ID === 'close-live'));
+      } finally {
+        await api.deleteTransaction({ ID: 'close-live' }, env).catch(() => {});
+        sqlite.exec("DELETE FROM nw_snapshots WHERE taken_at = 'x'");
+      }
+    });
+
     test('getWidget: pinned accounts, a 6-month net worth ending live, 3 recent rows', async () => {
       await assert.rejects(api.setWidgetAccounts({ names: ['a', 'b', 'c', 'd'] }, env), /at most 3/);
       await assert.rejects(api.setWidgetAccounts({ names: ['Nope'] }, env), /Unknown Account/);
@@ -1903,6 +1927,32 @@ function d1(db) {
       const bare = await worker.fetch(new Request('http://127.0.0.1/api?action=getAccounts'), env, ctx);
       assert.strictEqual((await bare.json()).status, 'success');
       assert.strictEqual((await call('/api?action=getAccounts')).status, 401);
+    });
+
+    test('/login: a spent attempt limit is 429, and SESSION_SALT signs every cookie out', async () => {
+      const login = (e, pass) => worker.fetch(new Request('https://x/login', { method: 'POST',
+        headers: { 'CF-Connecting-IP': '203.0.113.9' }, body: JSON.stringify({ pass }) }), e, ctx);
+      const keys = [];
+      const full = Object.assign({}, wenv, { PASS_LIMIT: { limit: async (o) => { keys.push(o.key); return { success: false }; } } });
+      // Even the RIGHT passphrase is refused: the limit is on attempts, not on misses.
+      assert.strictEqual((await login(full, 'pw')).status, 429);
+      assert.deepStrictEqual(keys, ['203.0.113.9'], 'the limit is per address');
+      // The consent page takes the same passphrase, so it spends the same counter.
+      const q = 'response_type=code&client_id=c&redirect_uri=' + encodeURIComponent('https://claude.ai/api/mcp/auth_callback') +
+        '&code_challenge=x&code_challenge_method=S256';
+      const consent = await worker.fetch(new Request('https://x/authorize', { method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: q + '&pass=pw' }), full, ctx);
+      assert.strictEqual(consent.status, 429);
+
+      const ok = await login(wenv, 'pw');
+      assert.strictEqual(ok.status, 200);
+      const old = { Cookie: ok.headers.get('Set-Cookie').split(';')[0] };
+      const get = (e, headers) => worker.fetch(new Request('https://x/api?action=getAccounts', { headers }), e, ctx);
+      assert.strictEqual((await get(wenv, old)).status, 200);
+      const salted = Object.assign({}, wenv, { SESSION_SALT: 'rotated' });
+      assert.strictEqual((await get(salted, old)).status, 401, 'a new salt must void the old cookie');
+      const fresh = { Cookie: (await login(salted, 'pw')).headers.get('Set-Cookie').split(';')[0] };
+      assert.strictEqual((await get(salted, fresh)).status, 200);
     });
 
     test('/api enforces the GET/POST split and answers errors as JSON 200', async () => {
